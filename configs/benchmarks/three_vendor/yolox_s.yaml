@@ -1,0 +1,254 @@
+# Confirmed 3-vendor experiment. Override runtime.platform and data/output paths per host.
+num_classes: 81
+runtime:
+  platform: nvidia
+  aligned: true
+  async_norm: true
+  special_bn_init: true
+  rank_init: true
+  task_names: det
+  fp16: true
+  random_seed: 131
+  expected_world_size: 4
+  dnn:
+    benchmark: true
+    deterministic: false
+    allow_tf32: false
+export:
+  input_size:
+  - 3
+  - 640
+  - 640
+  opset: 17
+mosaic: &id001
+  type: mosaic
+  kwargs:
+    extra_input: true
+    tar_size: 640
+    fill_color: 0
+mixup: &id003
+  type: yolox_mixup_cv2
+  kwargs:
+    extra_input: true
+    input_size:
+    - 640
+    - 640
+    mixup_scale:
+    - 0.8
+    - 1.6
+    fill_color: 0
+random_perspective: &id002
+  type: random_perspective_yolox
+  kwargs:
+    degrees: 10.0
+    translate: 0.1
+    scale:
+    - 0.1
+    - 2.0
+    shear: 2.0
+    perspective: 0.0
+    fill_color: 0
+    border:
+    - -320
+    - -320
+augment_hsv: &id004
+  type: augment_hsv
+  kwargs:
+    hgain: 0.015
+    sgain: 0.7
+    vgain: 0.4
+    color_mode: BGR
+flip: &id005
+  type: flip
+  kwargs:
+    flip_p: 0.5
+to_tensor: &id007
+  type: custom_to_tensor
+train_resize: &id006
+  type: keep_ar_resize_max
+  kwargs:
+    random_size:
+    - 15
+    - 25
+    scale_step: 32
+    padding_type: left_top
+    padding_val: 0
+test_resize: &id008
+  type: keep_ar_resize_max
+  kwargs:
+    max_size: 640
+    padding_type: left_top
+    padding_val: 0
+dataset:
+  train:
+    dataset:
+      type: coco
+      kwargs:
+        meta_file: coco/annotations/instances_train2017.json
+        image_reader:
+          type: fs_opencv
+          kwargs:
+            image_dir: coco/train2017
+            color_mode: BGR
+        transformer:
+        - *id001
+        - *id002
+        - *id003
+        - *id004
+        - *id005
+        - *id006
+        - *id007
+    batch_sampler:
+      type: base
+      kwargs:
+        sampler:
+          type: dist
+          kwargs: {}
+        batch_size: 8
+  test:
+    dataset:
+      type: coco
+      kwargs:
+        meta_file: coco/annotations/instances_val2017.json
+        image_reader:
+          type: fs_opencv
+          kwargs:
+            image_dir: coco/val2017
+            color_mode: BGR
+        transformer:
+        - *id008
+        - *id007
+        evaluator:
+          type: COCO
+          kwargs:
+            gt_file: coco/annotations/instances_val2017.json
+            iou_types:
+            - bbox
+    batch_sampler:
+      type: base
+      kwargs:
+        sampler:
+          type: dist
+          kwargs: {}
+        batch_size: 8
+  dataloader:
+    type: base
+    kwargs:
+      num_workers: 8
+      alignment: 32
+      worker_init: true
+      pad_type: batch_pad
+trainer:
+  max_epoch: 300
+  save_freq: 1
+  test_freq: 1
+  only_save_latest: true
+  optimizer:
+    register_type: yolov5
+    type: SGD
+    kwargs:
+      lr: 0.00015625
+      momentum: 0.9
+      nesterov: true
+      weight_decay: 0.0005
+  lr_scheduler:
+    lr_register_type: yolox_base
+    warmup_epochs: 5
+    warmup_type: yolox_cos
+    type: YoloXCosineLR
+    kwargs:
+      T_max: 300
+      min_lr_scale: 0.05
+      no_aug_epoch: 15
+saver:
+  save_dir: outputs/yolox_s/checkpoints
+  results_dir: outputs/yolox_s/results
+  auto_resume: false
+hooks:
+- type: yolox_noaug
+  kwargs:
+    no_aug_epoch: 15
+    max_epoch: 300
+    transformer:
+    - *id004
+    - *id005
+    - *id006
+    - *id007
+- type: auto_save_best
+ema:
+  enable: true
+  ema_type: exp
+  kwargs:
+    decay: 0.9998
+net:
+- name: backbone
+  type: yolox_s
+  kwargs:
+    out_layers:
+    - 2
+    - 3
+    - 4
+    out_strides:
+    - 8
+    - 16
+    - 32
+    normalize:
+      type: solo_bn
+    act_fn:
+      type: Silu
+- name: neck
+  prev: backbone
+  type: YoloxPAFPN
+  kwargs:
+    depth: 0.33
+    out_strides:
+    - 8
+    - 16
+    - 32
+    act_fn:
+      type: Silu
+- name: roi_head
+  prev: neck
+  type: YoloXHead
+  kwargs:
+    num_classes: 81
+    width: 0.5
+    num_point: 1
+    act_fn:
+      type: Silu
+- name: yolox_post
+  prev: roi_head
+  type: yolox_post
+  kwargs:
+    num_classes: 81
+    cfg:
+      loc_loss:
+        type: iou_loss
+        kwargs:
+          loss_type: square_iou
+          loss_weight: 5.0
+      cls_loss:
+        type: sigmoid_cross_entropy
+      obj_loss:
+        type: sigmoid_cross_entropy
+      anchor_generator:
+        type: fcos
+        kwargs:
+          dense_points: 1
+          center: false
+      roi_supervisor:
+        type: ota
+        kwargs:
+          num_classes: 81
+          matcher:
+            type: ota
+            kwargs:
+              num_classes: 81
+      roi_predictor:
+        type: yolox
+        kwargs:
+          num_classes: 81
+          pre_nms_score_thresh: 0.01
+          nms:
+            type: naive
+            nms_iou_thresh: 0.65

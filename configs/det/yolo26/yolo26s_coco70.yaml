@@ -1,0 +1,95 @@
+# Official checkpoint recipe: 150-epoch Objects365 initialization -> COCO 70 epochs.
+# Use `python -m up yolo26`, not the YOLO11 UP Runner.
+plugin:
+  task: detect
+  model: yolo26s.yaml
+  classes: 80
+  optimizer_class: MuSGD
+official:
+  repository: https://github.com/ultralytics/ultralytics
+  revision: 557e95b99c24c5b0d4eb5973d5d54a20a799566a
+  package_sha256: 5ff887c83031b20b0c0919b34be67bdba59e75fef445f15d1b1f39f4eaa36ab7
+initialization:
+  url: https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26s-objv1-150.pt
+  sha256: 9d879c1bf2f79703d0b6175220fb113c6d8b700d61d30fcf4e37a664911933f0
+runtime:
+  platform: nvidia  # metax_cuda in the matching MACA Torch environment.
+  expected_world_size: 4
+  dnn:
+    benchmark: true
+    deterministic: false
+    allow_tf32: false
+train:
+  epochs: 70
+  batch: 128  # Global: 4 x 32. Official nbs controls optimizer accumulation/decay.
+  imgsz: 640
+  seed: 131
+  deterministic: false
+  amp: true
+  pretrained: true
+  optimizer: MuSGD
+  lr0: 0.00038
+  lrf: 0.88219
+  momentum: 0.94751
+  weight_decay: 0.00027
+  warmup_epochs: 0.98745
+  warmup_momentum: 0.54064
+  warmup_bias_lr: 0.05684
+  cos_lr: false
+  nbs: 64
+  o2m: 0.70518
+  muon_w: 0.4355
+  sgd_w: 0.47908
+  cls_w: 3.48357
+  stride_ratio: 1.0
+  detach_epoch: 10
+  topk: 5
+  end2end: true
+  box: 9.83241
+  cls: 0.64896
+  dfl: 0.95824
+  hsv_h: 0.01315
+  hsv_s: 0.35348
+  hsv_v: 0.19383
+  degrees: 0.00012
+  translate: 0.27484
+  scale: 0.9
+  shear: 0.00136
+  perspective: 0.00074
+  flipud: 0.00653
+  fliplr: 0.30393
+  bgr: 0.0
+  mosaic: 0.99182
+  mixup: 0.05
+  cutmix: 0.00082
+  copy_paste: 0.40413
+  copy_paste_mode: flip
+  close_mosaic: 10
+  multi_scale: 0.0
+  fraction: 1.0
+  single_cls: false
+  rect: false
+  dropout: 0.0
+  compile: false
+  cache: false
+  workers: 8
+  patience: 100
+  val: true
+  split: val
+  save: true
+  save_period: -1
+  save_json: true
+  plots: false
+  conf: null
+  iou: 0.7
+  max_det: 300
+validation:
+  batch: 32  # Standalone single-device validation.
+  half: true
+export:
+  batch: 1
+  half: false
+  opset: 17
+  dynamic: false
+  simplify: false
+  nms: false  # Preserve official end-to-end outputs.

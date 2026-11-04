@@ -1,0 +1,5 @@
+include LICENSE
+recursive-include up/extensions/csrc *.h *.cpp *.cu
+include up/tasks/det/plugins/detr/official/LICENSE
+recursive-include configs *.yaml
+recursive-include requirements *.txt

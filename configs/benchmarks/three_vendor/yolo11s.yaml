@@ -1,0 +1,146 @@
+# YOLO11s official recipe; use coco2017labels-segments, including detection CopyPaste.
+num_classes: 81
+runtime:
+  task_names: det
+  aligned: true
+  platform: nvidia
+  fp16: true
+  runner:
+    type: yolo11
+  inferencer:
+    type: yolo11
+  random_seed: 131
+  expected_world_size: 4
+  dnn:
+    benchmark: true
+    deterministic: false
+    allow_tf32: false
+dataset:
+  train:
+    dataset:
+      type: yolo11_coco
+      kwargs:
+        meta_file: coco/annotations/instances_train2017.json
+        image_reader:
+          type: fs_opencv
+          kwargs:
+            image_dir: coco/train2017
+            color_mode: RGB
+        transformer: []
+        training: true
+        imgsz: 640
+        hyp:
+          hsv_h: 0.015
+          hsv_s: 0.7
+          hsv_v: 0.4
+          degrees: 0.0
+          translate: 0.1
+          scale: 0.9
+          shear: 0.0
+          perspective: 0.0
+          flipud: 0.0
+          fliplr: 0.5
+          mosaic: 1.0
+          mixup: 0.05
+          copy_paste: 0.15
+          copy_paste_mode: flip
+          cutmix: 0.0
+          bgr: 0.0
+          deterministic: false
+        label_dir: coco/labels/train2017
+    batch_sampler:
+      type: base
+      kwargs:
+        sampler:
+          type: dist
+          kwargs: {}
+        batch_size: 32
+  test:
+    dataset:
+      type: yolo11_coco
+      kwargs:
+        meta_file: coco/annotations/instances_val2017.json
+        image_reader:
+          type: fs_opencv
+          kwargs:
+            image_dir: coco/val2017
+            color_mode: RGB
+        transformer: []
+        evaluator:
+          type: COCO
+          kwargs:
+            gt_file: coco/annotations/instances_val2017.json
+            iou_types:
+            - bbox
+        training: false
+        imgsz: 640
+        hyp:
+          hsv_h: 0.015
+          hsv_s: 0.7
+          hsv_v: 0.4
+          degrees: 0.0
+          translate: 0.1
+          scale: 0.9
+          shear: 0.0
+          perspective: 0.0
+          flipud: 0.0
+          fliplr: 0.5
+          mosaic: 1.0
+          mixup: 0.05
+          copy_paste: 0.15
+          copy_paste_mode: flip
+          cutmix: 0.0
+          bgr: 0.0
+          deterministic: false
+        label_dir: coco/labels/val2017
+    batch_sampler:
+      type: base
+      kwargs:
+        sampler:
+          type: dist_test
+          kwargs: {}
+        batch_size: 64
+  dataloader:
+    type: yolo11
+    kwargs:
+      num_workers: 4
+      seed: 131
+  builder_type: yolo11
+trainer:
+  max_epoch: 600
+  global_batch: 128
+  save_freq: 1
+  test_freq: 1
+  close_mosaic: 10
+  optimizer:
+    lr: 0.01
+    momentum: 0.9
+    weight_decay: 0.0005
+    nominal_batch: 64
+  lr_scheduler:
+    lr: 0.01
+    lrf: 0.01
+    warmup_epochs: 3
+    warmup_momentum: 0.8
+    momentum: 0.9
+    warmup_bias_lr: 0.0
+saver:
+  save_dir: outputs/yolo11s/checkpoints
+  results_dir: outputs/yolo11s/results
+  auto_resume: false
+hooks: []
+net:
+- name: detector
+  type: yolo11s
+  kwargs:
+    num_classes: 81
+    score_threshold: 0.001
+    multi_label: true
+    nms_threshold: 0.7
+    max_detections: 300
+export:
+  input_size:
+  - 3
+  - 640
+  - 640
+  opset: 17

@@ -1,0 +1,50 @@
+name: Package and CLI
+on: [push, pull_request]
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    env:
+      CUDA_VISIBLE_DEVICES: ""
+      OMP_NUM_THREADS: "2"
+      MKL_NUM_THREADS: "2"
+      YOLO_CONFIG_DIR: /tmp/up-yolo-settings
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Install matching CPU Torch and application dependencies
+        run: |
+          python -m pip install torch==2.10.0 torchvision==0.25.0 --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -r requirements.txt -r requirements/export.txt
+          python -m pip install --no-deps -r requirements/yolo11.txt
+          python -m pip install --no-deps -e .
+          mkdir -p "$YOLO_CONFIG_DIR/Ultralytics"
+      - name: Check Python sources and CLI entry points
+        run: |
+          python -m compileall -q up tools
+          python -m up --help
+          python -m up train --help
+          python -m up inference --help
+          python -m up to_onnx --help
+          python tools/prepare_training_init.py --help
+          python -m up yolo26 --help
+          python tools/run_yolo26.py --help
+      - name: Load public YAML configurations
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from up.utils.general.yaml_loader import load_yaml
+          for path in sorted(Path('configs').rglob('*.yaml')):
+              config = load_yaml(str(path))
+              assert isinstance(config, dict), path
+              print(path)
+          PY
+      - name: Public wheel build without CUDA
+        run: |
+          python -m pip wheel --no-deps . -w /tmp/up-wheels
+          python -m pip install --no-deps --target /tmp/up-wheel-install /tmp/up-wheels/up-*.whl
+          cd /tmp
+          PYTHONPATH=/tmp/up-wheel-install python -c "import pathlib, torch, up; from up.runtime import setup_runtime; assert str(pathlib.Path(up.__file__)).startswith('/tmp/up-wheel-install/'); r = setup_runtime({'runtime': {'platform': 'metax_cuda'}}, purpose='inference'); assert len(r.native_ops.capabilities()) == 16; assert not torch.cuda.is_initialized()"

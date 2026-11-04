@@ -1,0 +1,72 @@
+# Released classifier train_args, using the pinned public v8.4.0 implementation.
+# The reference checkpoint has no historical Git commit; it is NOT training init.
+plugin:
+  task: classify
+  model: yolo26s-cls.yaml
+  classes: 1000
+  optimizer_class: SGD
+  optimizer_initial_lr: 0.1
+official:
+  repository: https://github.com/ultralytics/ultralytics
+  revision: v8.4.0
+  package_sha256: b7444b23b5d81991896543deb6f30751a91d18f65bf83048b28cf37229a0d60e
+initialization:
+  method: random  # Build once on CPU, copy identical weights to both vendors.
+runtime:
+  platform: nvidia
+  expected_world_size: 4
+  dnn:
+    benchmark: true
+    deterministic: false
+    allow_tf32: false
+train:
+  epochs: 200
+  batch: 256  # Global: 4 x 64.
+  imgsz: 224
+  seed: 131
+  deterministic: false
+  amp: true
+  pretrained: true  # Official YAML-model construction; no pretrained .pt is loaded.
+  optimizer: SGD  # Match the released checkpoint's actual LR history; auto selects 0.01 in v8.4.0.
+  lr0: 0.1
+  lrf: 0.01
+  momentum: 0.9
+  weight_decay: 0.0001
+  nbs: 256
+  warmup_epochs: 0
+  warmup_momentum: 0.8
+  warmup_bias_lr: 0.0
+  cos_lr: true
+  dropout: 0.0
+  hsv_h: 0.015
+  hsv_s: 0.4
+  hsv_v: 0.4
+  fliplr: 0.5
+  flipud: 0.0
+  scale: 0.5
+  auto_augment: randaugment
+  erasing: 0.4
+  close_mosaic: 15  # Recorded official value; inactive for classification.
+  fraction: 1.0
+  single_cls: false
+  rect: false
+  compile: false
+  cache: false
+  workers: 8
+  patience: 100
+  val: true
+  split: val
+  save: true
+  save_period: -1
+  save_json: true
+  plots: false
+validation:
+  batch: 64
+  half: true
+export:
+  batch: 1
+  half: false
+  opset: 17
+  dynamic: false
+  simplify: false
+  nms: false

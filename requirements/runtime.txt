@@ -1,0 +1,18 @@
+# Application dependencies for modern, vendor-provided PyTorch environments.
+# Install the matching torch/torchvision/vendor extension from the vendor first.
+# 这里只安装应用依赖；厂商 Torch/SDK 由各自环境提供，不在这里自动切换。
+numpy>=1.23,<2
+scipy>=1.9,<2
+prettytable
+pycocotools>=2.0.6
+pandas>=1.5,<3
+easydict>=1.9
+opencv-python>=4.6,<4.12
+tensorboardX>=2.5
+matplotlib>=3.6
+Pillow>=9
+psutil>=5.9
+scikit-learn>=1.1
+PyYAML>=6
+requests>=2.28
+tqdm>=4.64

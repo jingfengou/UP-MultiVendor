@@ -1,0 +1,5 @@
+# Install --no-deps after vendor Torch and requirements.txt.
+# Ultralytics itself is loaded from the task-specific pinned source checkout.
+ultralytics-thop==2.0.18
+polars==1.31.0
+faster-coco-eval==1.6.7

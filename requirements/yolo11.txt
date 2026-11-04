@@ -1,0 +1,4 @@
+# Install with --no-deps after the vendor Torch and UP runtime requirements.
+ultralytics==8.3.225
+ultralytics-thop>=2.0.18,<3
+polars>=0.20,<3
