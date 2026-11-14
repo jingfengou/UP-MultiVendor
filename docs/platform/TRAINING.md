@@ -2,7 +2,11 @@
 
 以下配置用于在不同厂商环境运行相同训练任务。先完成 [安装](../../README.md#安装与选择厂商)，再设置数据路径。
 
-新增的 YOLO26s COCO 70 轮与 YOLO26s-cls ImageNet 200 轮，使用独立的官方训练插件。完整 YAML、初始化、训练、验证、预测及 ONNX 命令见 [YOLO26 使用指南](YOLO26.md)。下面保留已有 UP Runner 配置及 DETR 原始长配方。
+**新训练请使用 [统一 UP 训练配方](REFERENCE_RECIPES.md)。** ResNet50、YOLOX、YOLO26 和 DETR 均由原有 `BaseRunner` 执行，训练、验证、图片推理使用通用命令，通过 YAML 选择模型和厂商。
+
+下面保留旧配置与命令，供已有任务恢复和兼容使用。其中 YOLO26 旧入口和 DETR 官方入口使用官方训练循环；不要与新的 `reference_aligned/` 配方混用。
+
+## 旧配置与命令
 
 | 模型 / 配置 | 数据集 | Epochs | 输入 | 卡数 × 每卡训练 batch | 每卡验证 batch |
 |---|---|---:|---|---:|---:|

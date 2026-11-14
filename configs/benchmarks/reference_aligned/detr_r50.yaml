@@ -1,0 +1,110 @@
+num_classes: 91
+official:
+  source: ${DETR_SOURCE}
+  package_sha256: d785c08241a4c0d01f4ae647a7f2e2de971896ad8a642e03875f942d046fc580
+runtime:
+  platform: nvidia
+  task_names: det
+  runner:
+    type: base
+  inferencer:
+    type: official_detr
+  fp16: false
+  expected_world_size: 4
+  rank_init: true
+  random_seed: 42
+  audit_recipe: true
+  # Keep both DNN and matrix products in the reference FP32 policy.
+  dnn:
+    benchmark: false
+    deterministic: false
+    allow_tf32: false
+  ddp:
+    broadcast_buffers: true
+dataset:
+  builder_type: official_detr
+  source: ${DETR_SOURCE}
+  package_sha256: d785c08241a4c0d01f4ae647a7f2e2de971896ad8a642e03875f942d046fc580
+  args:
+    coco_path: ${COCO_ROOT}
+    dataset_file: coco
+    masks: false
+  num_workers: 2
+  train:
+    batch_size: 4
+  test:
+    # Keep the official validation microbatch; only training compensates for 8 -> 4 GPUs.
+    batch_size: 2
+net:
+- name: official
+  type: official_detr
+  kwargs:
+    source: ${DETR_SOURCE}
+    package_sha256: d785c08241a4c0d01f4ae647a7f2e2de971896ad8a642e03875f942d046fc580
+    model_args:
+      backbone: resnet50
+      dilation: false
+      position_embedding: sine
+      enc_layers: 6
+      dec_layers: 6
+      dim_feedforward: 2048
+      hidden_dim: 256
+      dropout: 0.1
+      nheads: 8
+      num_queries: 100
+      pre_norm: false
+      aux_loss: true
+      set_cost_class: 1
+      set_cost_bbox: 5
+      set_cost_giou: 2
+      bbox_loss_coef: 5
+      giou_loss_coef: 2
+      eos_coef: 0.1
+      mask_loss_coef: 1
+      dice_loss_coef: 1
+      dataset_file: coco
+      masks: false
+      frozen_weights: null
+      device: cpu
+      lr_backbone: 1.0e-05
+trainer:
+  max_epoch: 150
+  test_freq: 1
+  save_freq: 1
+  execution:
+    model_first: true
+    nested_tensor: true
+    loss_key: model.loss
+    scheduler_interval: epoch_end
+    clip_max_norm: 0.1
+    zero_grad_before_backward: true
+  optimizer:
+    register_type: base
+    type: AdamW
+    special_param_group:
+    - key: backbone
+      lr: 1.0e-05
+    kwargs:
+      lr: 0.0001
+      weight_decay: 0.0001
+  lr_scheduler:
+    lr_register_type: base
+    type: StepLR
+    warmup_register_type: no_scale_lr
+    kwargs:
+      step_size: 100
+      gamma: 0.1
+hooks:
+- type: auto_save_best
+- type: recipe_audit
+saver:
+  save_dir: outputs/reference-aligned/detr_r50/checkpoints
+  results_dir: outputs/reference-aligned/detr_r50/results
+  auto_resume: false
+  require_empty: true
+export:
+  input_size:
+  - 3
+  - 800
+  - 800
+  opset: 17
