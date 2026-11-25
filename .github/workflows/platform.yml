@@ -40,7 +40,9 @@ jobs:
           from up.utils.general.yaml_loader import load_yaml
           # Syntax-only bindings; this job does not load official models or data.
           for key in ('YOLO26_DETECT_SOURCE', 'YOLO26_CLASSIFY_SOURCE', 'DETR_SOURCE',
-                      'COCO_ROOT', 'COCO_YOLO_YAML', 'IMAGENET_ROOT', 'OBJECTS365_WEIGHTS'):
+                      'COCO_ROOT', 'COCO_YOLO_YAML', 'IMAGENET_ROOT', 'OBJECTS365_WEIGHTS',
+                      'UP_IMAGENET_ROOT', 'UP_COCO_ROOT', 'UP_FAIR_OUTPUT_ROOT',
+                      'UP_MEGVII_YOLOX_OUTPUT_ROOT'):
               os.environ[key] = '/tmp/up-config-check/' + key.lower()
           for path in sorted(Path('configs').rglob('*.yaml')):
               config = load_yaml(str(path))

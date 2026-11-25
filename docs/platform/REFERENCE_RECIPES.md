@@ -1,5 +1,8 @@
 # Reference-aligned training
 
+For the five tasks in the vendor handoff, use the configuration and input
+table in [Four-model training and evaluation](FOUR_MODEL_RUNBOOK.md).
+
 All recipes in `configs/benchmarks/reference_aligned/` use UP's existing
 `BaseRunner`. UP owns batch iteration, backward, optimizer updates, validation
 iteration, checkpointing and image inference. The YOLO26 and DETR plugins reuse
@@ -43,37 +46,36 @@ The recipes below select the registered UP plugins through the common commands.
 
 | Configuration | Reference | Dataset | Epochs | Four GPUs: batch per GPU / total | Precision |
 | --- | --- | --- | --- | --- | --- |
-| `resnet50.yaml` | UP `52aaeb9e`, ResNet50 | ImageNet-1K | 100 | 256 / 1024 | FP32 |
-| `yolox_s.yaml` | UP `52aaeb9e`, YOLOX-S | COCO2017 | 300 | 8 / 32 | FP32 |
+| `resnet50_fair_native.yaml` | FAIR recipe with UP ResNet50 | ImageNet-1K | 90 | 64 / 256 | FP32 |
+| `yolox_s_megvii_native.yaml` | Megvii recipe with UP YOLOX-S | COCO2017 | 300 | 16 / 64 | AMP |
 | `yolo26s_detect.yaml` | Fixed YOLO26 detection source and released Objects365 initialization | COCO2017 | 70 | 32 / 128 | Official AMP |
 | `yolo26s_classify.yaml` | Public Ultralytics `v8.4.0` classification source | ImageNet-1K | 200 | 64 / 256 | Official AMP |
-| `detr_r50.yaml` | Official `29901c51`, 150-epoch recipe | COCO2017 | 150 | 4 / 16 | FP32 |
+| `detr_r50.yaml` | Official `29901c51`, 150-epoch recipe | COCO2017 | 150 | 8 / 32 | FP32 |
 
-ResNet50 changes the original YAML's batch per GPU from 64 to 256 to retain total
-batch 1024 on four GPUs. Its ordinary BN still uses each GPU's local batch.
-DETR changes the reference eight GPUs times batch two to four GPUs times batch
-four; validation stays at batch two per GPU. YOLOX retains its per-GPU batch.
+`resnet50.yaml` and `yolox_s.yaml` retain the original UP baselines at global
+batches 1024 and 32 respectively. The FAIR and Megvii YAMLs include their UP
+network definitions and select the reference training settings and registered
+recipe components. DETR uses global batch 32 and validation batch two per GPU.
+[Original DETR batch-size confirmation](https://github.com/facebookresearch/detr/issues/61#issuecomment-640496198)
+
 YOLO26's published device field does not establish the original physical GPU
 count; the recipes retain its published total batch.
 
-Classification uses the public `v8.4.0` implementation with explicit SGD and
-initial LR `0.1`, matching the released checkpoint's learning-rate log.
-Do not select `optimizer: auto`: this version would replace the requested LR
-with `0.01` for this training budget. Momentum remains `0.9` with Nesterov.
-Its three groups contain ordinary weights (decay `0.0001`), normalization
-weights (no decay) and biases (no decay).
-
-The released classification checkpoint's logs contain four LR columns; it
-retains neither optimizer state nor the original training commit. Its metadata
-reports version `8.3.100`. This configuration matches its initial LR while
-keeping the public `v8.4.0` three-group optimizer and cosine schedule.
-The published weight's Top-1 is `75.982%` (rounded to `76.0%`).
+Classification explicitly selects public `v8.4.0` MuSGD at initial LR `0.1`
+with a cosine schedule and four base parameter groups. Hybrid updates in this
+version use Muon and SGD coefficients of `0.5` each. The released checkpoint
+records version `8.3.100` and different argument values for the coefficients.
+Its original source commit and optimizer state are unavailable.
+[YOLO26 paper, Table S1](https://arxiv.org/html/2606.03748v1#S1.T1) ·
+[MuSGD in v8.4.0](https://github.com/ultralytics/ultralytics/blob/v8.4.0/ultralytics/optim/muon.py)
 
 ## What stays with each reference
 
-- ResNet50 and YOLOX use UP's original `set_random_seed`, initialization order,
+- The original UP ResNet50 and YOLOX baselines use UP's `set_random_seed`, initialization order,
   FP32, optimizer, learning-rate schedule and validation frequency. YOLOX retains
   its original BN averaging before scheduled validation.
+- The FAIR and Megvii recipes use seed `0` and select their own training
+  augmentations, learning-rate settings and validation schedules.
 - YOLO26 uses its fixed official seed initialization, AMP check, optimizer
   grouping, batch warmup, accumulation, EMA and epoch-state updates. These are
   registered UP components, not an embedded official Trainer.
@@ -146,8 +148,8 @@ inference reads images and writes visualized predictions. YOLO26 and DETR select
 their registered inference adapters through `runtime.inferencer` in the YAML,
 not through a separate model-specific command.
 
-For ResNet50 and YOLOX, bind their existing UP dataset paths in the YAML or with
-`--opts`; the recipes retain the original directory conventions. DETR requires
+For FAIR ResNet50 and Megvii YOLOX, set the `UP_*` environment bindings in the
+handoff guide. The original UP baselines retain their dataset path keys. DETR requires
 `DETR_SOURCE` and `COCO_ROOT`. Classification requires
 `YOLO26_CLASSIFY_SOURCE` and `IMAGENET_ROOT`.
 

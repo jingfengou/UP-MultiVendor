@@ -31,9 +31,9 @@ dataset:
     masks: false
   num_workers: 2
   train:
-    batch_size: 4
+    # Preserve the published 150-epoch recipe's global batch of 32 on four GPUs.
+    batch_size: 8
   test:
-    # Keep the official validation microbatch; only training compensates for 8 -> 4 GPUs.
     batch_size: 2
 net:
 - name: official

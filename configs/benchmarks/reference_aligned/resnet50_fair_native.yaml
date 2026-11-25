@@ -1,0 +1,93 @@
+# FAIR fb.resnet.torch ResNet-50 ImageNet recipe using native UP components.
+# UP_IMAGENET_ROOT contains train/, val/ and meta/{train,val}.txt in UP format.
+# Set UP_FAIR_OUTPUT_ROOT to a fresh AFS run directory.
+num_classes: !include resnet50.yaml//num_classes
+runtime:
+  task_names: cls
+  platform: nvidia
+  expected_world_size: 4
+  runner: {type: base}
+  fp16: false
+  random_seed: 0 # FAIR -manualSeed default.
+  rank_init: false
+  audit_recipe: true
+  dnn: {benchmark: true, allow_tf32: false}
+
+dataset:
+  train:
+    dataset:
+      type: cls
+      kwargs:
+        meta_file: ${UP_IMAGENET_ROOT}/meta/train.txt
+        image_reader:
+          type: fs_pillow
+          kwargs: {image_dir: "${UP_IMAGENET_ROOT}/train", color_mode: RGB}
+        transformer:
+        - type: torch_random_resized_crop
+          kwargs: {size: 224, scale: [0.08, 1.0], interpolation: bicubic}
+        - type: torch_color_jitter
+          kwargs: {brightness: 0.4, contrast: 0.4, saturation: 0.4}
+        - !include resnet50.yaml//to_tensor
+        - type: imagenet_pca_lighting
+          kwargs: {std: 0.1}
+        - !include resnet50.yaml//normalize
+        - !include resnet50.yaml//random_horizontal_flip
+    batch_sampler: &batch_sampler
+      type: base
+      kwargs:
+        sampler: {type: dist, kwargs: {}}
+        batch_size: 64 # 4 ranks x 64 images = 256.
+    dataloader: !include resnet50.yaml//dataset.train.dataloader
+  test:
+    dataset:
+      type: cls
+      kwargs:
+        meta_file: ${UP_IMAGENET_ROOT}/meta/val.txt
+        image_reader:
+          type: fs_pillow
+          kwargs: {image_dir: "${UP_IMAGENET_ROOT}/val", color_mode: RGB}
+        transformer:
+        - type: torch_resize
+          kwargs: {size: 256, interpolation: bicubic}
+        - !include resnet50.yaml//center_crop
+        - !include resnet50.yaml//to_tensor
+        - !include resnet50.yaml//normalize
+        evaluator: !include resnet50.yaml//dataset.test.dataset.kwargs.evaluator
+    batch_sampler: *batch_sampler
+    dataloader: !include resnet50.yaml//dataset.test.dataloader
+
+trainer:
+  max_epoch: 90
+  test_freq: 1
+  save_freq: 5
+  only_save_latest: false
+  optimizer:
+    type: SGD
+    kwargs: {lr: 0.1, momentum: 0.9, weight_decay: 0.0001, nesterov: true}
+  lr_scheduler:
+    type: MultiStepLR
+    warmup_register_type: no_scale_lr
+    kwargs: {milestones: [30, 60], gamma: 0.1}
+  execution: {scheduler_interval: epoch_end}
+
+saver:
+  save_dir: ${UP_FAIR_OUTPUT_ROOT}/checkpoints
+  results_dir: ${UP_FAIR_OUTPUT_ROOT}/results
+  auto_resume: false
+  require_empty: true
+
+hooks:
+- type: auto_save_best
+- type: auto_save_metric
+  kwargs: {metric_json: "${UP_FAIR_OUTPUT_ROOT}/results/metrics.json"}
+- type: recipe_audit
+net:
+- !include resnet50.yaml//net.0
+- !include resnet50.yaml//net.1
+- name: post_process
+  type: base_cls_postprocess
+  kwargs:
+    cls_loss: {type: ce}
+export: !include resnet50.yaml//export
+override@:
+  net.0.kwargs.initializer: {method: msra, mode: fan_out, a: 0}

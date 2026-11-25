@@ -49,11 +49,11 @@ def init_weights_xavier(module):
 
 
 @INITIALIZER_REGISTRY.register("msra")
-def init_weights_msra(module):
+def init_weights_msra(module, mode='fan_in', a=1):
     for m in module.modules():
         if isinstance(m, nn.Conv2d) or isinstance(m, nn.Linear) or isinstance(
                 m, nn.ConvTranspose2d):
-            nn.init.kaiming_normal_(m.weight.data, a=1)
+            nn.init.kaiming_normal_(m.weight.data, a=a, mode=mode)
             if m.bias is not None:
                 m.bias.data.zero_()
 

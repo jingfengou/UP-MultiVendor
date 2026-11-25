@@ -82,7 +82,8 @@ class CocoDataset(BaseDataset):
                  use_ignore=False,
                  evaluator=None,
                  cache=None,
-                 clip_box=True):
+                 clip_box=True,
+                 include_unannotated=False):
         with no_print():
             self.coco = self._loader(meta_file)
 
@@ -120,7 +121,7 @@ class CocoDataset(BaseDataset):
             img['aspect_ratio'] = float(img['height']) / img['width']
         self.img_ids = list(set([_['image_id'] for _ in self.coco.anns.values()]))
 
-        if len(self.img_ids) == 0:
+        if include_unannotated or len(self.img_ids) == 0:
             # len of img ids is 0 (might because this is test info), load from images'
             self.img_ids = list(self.coco.imgs.keys())
 

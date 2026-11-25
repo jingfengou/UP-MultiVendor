@@ -41,7 +41,7 @@ dataset:
     name: yolo26s_classify
     exist_ok: false
     pretrained: true
-    optimizer: SGD
+    optimizer: MuSGD
     verbose: true
     seed: 0
     deterministic: true
@@ -94,8 +94,7 @@ dataset:
     opset: null
     workspace: null
     nms: false
-    # Explicit SGD preserves the released training log's initial LR of 0.1.
-    # Do not use auto: public v8.4.0 would replace this LR with 0.01.
+    # This explicit selection preserves the paper's optimizer and the release LR of 0.1.
     lr0: 0.1
     lrf: 0.01
     momentum: 0.9
@@ -1157,7 +1156,7 @@ trainer:
     unwrap_evaluation: true
   optimizer:
     register_type: official_yolo26
-    type: SGD
+    type: MuSGD
     kwargs: {}
   lr_scheduler:
     lr_register_type: official_yolo26
