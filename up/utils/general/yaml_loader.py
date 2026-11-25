@@ -3,6 +3,7 @@ import re
 import os.path
 import json
 import copy
+import os
 
 from .user_analysis_helper import get_task_from_cfg
 from .log_helper import default_logger as logger
@@ -185,7 +186,20 @@ def load_yaml(path, cfg_type='up'):
     # cfg check
     # return check_cfg(yaml_data)\
     # TODO check_cfg
-    return yaml_data
+    def expand(value):
+        if isinstance(value, str) and '${' in value:
+            # Reference recipes use explicit path bindings, not environment-wide
+            # package switching. Fail before training when a binding is missing.
+            result = os.path.expandvars(value)
+            if '${' in result:
+                raise ValueError('Unset environment binding in config: ' + value)
+            return result
+        if isinstance(value, dict):
+            return {key: expand(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [expand(item) for item in value]
+        return value
+    return expand(yaml_data)
 
 
 class POD2UP:

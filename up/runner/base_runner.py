@@ -53,6 +53,15 @@ class BaseRunner(object):
         # Runner 只持有已选运行时，训练、验证和输入迁移都从这里取得设备能力。
         self.runtime = setup_runtime(self.config)
         self.set_default_cfg()
+        # Official-model adapters use the same loop, with explicit update timing.
+        # Existing UP recipes leave this empty and retain their original order.
+        self.execution = self.config.get('trainer', {}).get('execution', {})
+        if self.execution.get('scheduler_interval', 'batch') not in ('batch', 'epoch_start', 'epoch_end'):
+            raise ValueError('trainer.execution.scheduler_interval must be batch, epoch_start or epoch_end')
+        self._completed_batches = 0
+        self.optimizer_updates = 0
+        self._last_update_batch = -1
+        self._batch_in_progress = False
         self.iter_base = self.config['runtime']['iter_base']
         self.device = self.runtime.device
         self.aligned = self.config['runtime']['aligned']
@@ -66,7 +75,18 @@ class BaseRunner(object):
             print("node memory info after build", node_info)
 
     def prepare_fp16(self):
-        if self.config['runtime'].get('fp16', False):
+        enabled = self.config['runtime'].get('fp16', False)
+        if enabled and self.execution.get('amp_check', False):
+            checks = [module.check_amp for module in self.model.modules()
+                      if callable(getattr(module, 'check_amp', None))]
+            if len(checks) != 1:
+                raise ValueError('amp_check requires exactly one model AMP check')
+            checked = checks[0]() if env.is_master() else False
+            flag = torch.tensor(int(checked), device=self.device, dtype=torch.int32)
+            if env.distributed:
+                torch.distributed.broadcast(flag, src=0)
+            enabled = bool(flag.item())
+        if enabled:
             if self.backend == 'dist':
                 # 损失缩放规则保持 PyTorch AMP 语义，选择与当前设备匹配的实现。
                 self.scaler = self.runtime.amp.GradScaler(enabled=True)
@@ -95,12 +115,21 @@ class BaseRunner(object):
     def build(self):
         self.build_env()
         self.get_git_version()
-        self.build_dataloaders()
-        self.prepare_fp16()
-        self.build_model()
+        if self.execution.get('model_first', False):
+            self.build_model()
+            self.prepare_fp16()
+            self.wrap_dist_model()
+            self.build_dataloaders()
+        else:
+            self.build_dataloaders()
+            self.prepare_fp16()
+            self.build_model()
         self.build_trainer()
         self.build_saver()
         self.build_hooks()
+        if self.execution and not self.execution.get('model_first', False):
+            # Match official DDP initialization before EMA snapshots rank-zero weights.
+            self.wrap_dist_model()
         self.build_ema()
         self.resume_model()
         self.prepare_dist_model()
@@ -130,6 +159,10 @@ class BaseRunner(object):
             train_epoch_size = 1
             logger.info("using iter_base, data_size are set to 1")
         register_type = cfg_lr_scheduler.pop('lr_register_type', 'base')
+        # The original base builder expresses StepLR milestones in epochs.
+        # Its data_size conversion is one when the loop already steps per epoch.
+        if register_type == 'base' and self.execution.get('scheduler_interval') in ('epoch_start', 'epoch_end'):
+            train_epoch_size = 1
         lr_scheduler_ins = LR_SCHEDULER_REGISTY[register_type](cfg_lr_scheduler,
                                                                self.optimizer,
                                                                train_epoch_size,
@@ -169,6 +202,8 @@ class BaseRunner(object):
                 data_builder = DATA_BUILDER_REGISTY[builder_type[idx]](cfg_data, data_source, reload_cfg)
                 source = data_source.split(':')[-1]
                 loader = data_builder.build_dataloader()
+                if self.execution.get('model_first', False) and hasattr(loader.dataset, 'bind_model'):
+                    loader.dataset.bind_model(self.model_components())
                 logger.info(f'build {data_source} done')
                 loaders[source] = loader
             return loaders
@@ -219,14 +254,29 @@ class BaseRunner(object):
         self.build_global_flags()
         rank_init = self.config['runtime']['rank_init']
         random_seed = self.config['runtime']['random_seed']
-        set_random_seed(random_seed, rank_init)
+        seed_policy = self.config['runtime'].get('seed_policy', 'up')
+        if seed_policy == 'up':
+            set_random_seed(random_seed, rank_init)
+        else:
+            # Seed policy is a recipe component, not a model branch in the loop.
+            from importlib import import_module
+            module_name, function_name = seed_policy.rsplit('.', 1)
+            initializer = getattr(import_module(module_name), function_name)
+            initializer(self.config, env.rank if env.distributed else -1)
         self.runtime.configure_dnn(self.config['runtime'].get('dnn'),
                                    legacy_nocudnn=self.args.get('nocudnn', False))
+        if self.config['runtime'].get('audit_recipe', False):
+            from up.utils.general.recipe_audit import rng_snapshot
+            self._initial_rng = rng_snapshot(self.runtime)
         logger.info(f'world size:{env.world_size}')
 
     def resume_model(self):
         ckpt = self.saver.load_pretrain_or_resume()
-        self.model.load(ckpt['model'])
+        load_target = self.model.module if isinstance(self.model, DDP) else self.model
+        if self.execution and ckpt['model']:
+            load_target.load_state_dict(ckpt['model'], strict=True)
+        else:
+            load_target.load(ckpt['model'])
         if self.training:
             if self.fp16:
                 if self.backend == 'dist':
@@ -236,6 +286,15 @@ class BaseRunner(object):
                 self.optimizer.load_state_dict(ckpt['optimizer'])
                 self.lr_scheduler.load_state_dict(ckpt['lr_scheduler'])
                 logger.info(f'resume from epoch:{start_epoch} iteration:{self.cur_iter}')
+                if self.execution:
+                    state = ckpt['execution']
+                    self._completed_batches = state['completed_batches']
+                    self.optimizer_updates = state['optimizer_updates']
+                    self._last_update_batch = state['last_update_batch']
+        if self.execution and 'component_state' in ckpt:
+            for name, module in self.model_components().named_modules():
+                if name in ckpt['component_state'] and hasattr(module, 'load_training_state'):
+                    module.load_training_state(ckpt['component_state'][name])
         if 'ema' in ckpt and self.ema is not None:
             if ckpt['ema']:
                 logger.info("load ckpt ema to model ema")
@@ -243,6 +302,19 @@ class BaseRunner(object):
 
     def build_saver(self):
         cfg_saver = self.config['saver']
+        if cfg_saver.get('require_empty', False) and self.training:
+            directory = os.path.join(self.work_dir, cfg_saver['save_dir'])
+            resuming = cfg_saver.get('resume_model') or cfg_saver.get('auto_resume', False)
+            # Check once before rank zero writes its YAML. Otherwise a later
+            # rank can mistake this same new run for an existing checkpoint.
+            occupied = bool(not resuming and os.path.isdir(directory) and os.listdir(directory)) \
+                if env.is_master() else False
+            if env.distributed:
+                decision = [occupied]
+                torch.distributed.broadcast_object_list(decision, src=0)
+                occupied = decision[0]
+            if occupied:
+                raise FileExistsError('Choose a new checkpoint directory: ' + directory)
         if 'kwargs' not in cfg_saver:
             _cfg_saver = {"type": 'base', "kwargs": {}}
             if 'type' in cfg_saver:
@@ -282,6 +354,9 @@ class BaseRunner(object):
         ema_type = ema_config.get('ema_type', 'linear')
         ema_config['kwargs']['model'] = self.build_fake_model()
         self.ema = EMA_REGISTRY.get(ema_type)(**ema_config['kwargs'])
+
+    def model_components(self):
+        return self.model.module if isinstance(self.model, DDP) else self.model
 
     def build_hooks(self):
         cfg_hooks = self.config.get('hooks', [])
@@ -326,24 +401,36 @@ class BaseRunner(object):
         logger.info(f"is_eval: {self.is_eval}")
 
     def prepare_dist_model(self):
+        if not self.execution:
+            self.wrap_dist_model()
+
+        if self.training:
+            self.start_iter = self.cur_iter if self.execution else self.lr_scheduler.last_iter
+            for source in self.train_pool:
+                dataset_name = source.split(':')[-1]
+                loader = self.data_loaders[dataset_name]
+                if hasattr(loader, 'set_start_iter'):
+                    loader.set_start_iter(self.start_iter)
+                else:
+                    loader.batch_sampler.set_start_iter(self.start_iter)
+
+    def wrap_dist_model(self):
         if env.distributed:
             if self.backend == 'dist':
                 # 单进程直接执行模型，多进程的梯度同步交给 PyTorch DDP。
                 logger.info('using ddp')
-                self.model = DDP(self.model, device_ids=[env.local_rank], broadcast_buffers=False)
+                ddp_options = {'broadcast_buffers': False}
+                ddp_options.update(self.config['runtime'].get('ddp', {}))
+                self.model = DDP(self.model, device_ids=[env.local_rank], **ddp_options)
 
-        if self.training:
-            self.start_iter = self.lr_scheduler.last_iter
-            for source in self.train_pool:
-                dataset_name = source.split(':')[-1]
-                self.data_loaders[dataset_name].batch_sampler.set_start_iter(self.start_iter)
-
-    def save(self, auto_save=None, lns=None):
+    def save(self, auto_save=None, lns=None, metric_val=None):
         save_dict = self.get_dump_dict()
         if auto_save is not None:
             save_dict['auto_save'] = auto_save
         if lns is not None:
             save_dict['lns'] = lns
+        if metric_val is not None:
+            save_dict['metric_val'] = metric_val
         if env.is_master():
             self.saver.save(**save_dict)
 
@@ -357,15 +444,38 @@ class BaseRunner(object):
     def train(self):
         self._hooks('before_train')
         self.model.to(self.device).train()
+        if self.execution:
+            self.optimizer.zero_grad()
         for iter_idx in range(self.start_iter, self.max_iter):
+            self._batch_in_progress = True
+            if self.execution and iter_idx % self.train_epoch_size == 0:
+                loader = self.data_loaders['train']
+                if hasattr(loader, 'set_epoch'):
+                    loader.set_epoch(iter_idx // self.train_epoch_size)
+                self._hooks('before_epoch', iter_idx // self.train_epoch_size)
+                if self.execution.get('scheduler_interval') == 'epoch_start':
+                    self.lr_scheduler.step()
+            if self.execution and hasattr(self.lr_scheduler, 'before_batch'):
+                self.lr_scheduler.before_batch(iter_idx)
             batch = self.get_batch('train')
             loss = self.forward_train(batch)
             self.backward(loss)
-            self.update()
-            if self.ema is not None:
+            accumulate = getattr(self.lr_scheduler, 'accumulate', 1)
+            do_update = not self.execution or iter_idx - self._last_update_batch >= accumulate
+            if do_update:
+                self.update()
+                self._last_update_batch = iter_idx
+            if self.ema is not None and do_update:
                 self.ema.step(self.model, curr_step=iter_idx)
+            if self.execution:
+                if (iter_idx + 1) % self.train_epoch_size == 0:
+                    if self.execution.get('scheduler_interval') == 'epoch_end':
+                        self.lr_scheduler.step()
+                    self._hooks('after_epoch', (iter_idx + 1) // self.train_epoch_size)
+            # Keep cur_iter on the current batch through validation/save hooks.
+            # The checkpoint writes the next batch explicitly below.
             if self.is_test(iter_idx):
-                if iter_idx == self.start_iter:
+                if iter_idx == self.start_iter and not self.execution:
                     continue
                 if self.config['runtime']['async_norm']:
                     from up.utils.env.dist_helper import all_reduce_norm
@@ -379,12 +489,19 @@ class BaseRunner(object):
             else:
                 if self.is_save(iter_idx):
                     self.save()
-            self.lr_scheduler.step()
+            if not self.execution or self.execution.get('scheduler_interval', 'batch') == 'batch':
+                self.lr_scheduler.step()
+            if self.execution:
+                self._completed_batches = iter_idx + 1
+            self._batch_in_progress = False
+            if self.execution and getattr(self, 'stop_training', False):
+                break
         self._hooks('after_train')
 
     @torch.no_grad()
     def _inference(self):
         self.model.to(self.device).eval()
+        self._evaluating_batches = True
         test_loader = self.data_loaders['test']
         all_results_list = []
         test_resume = ((hasattr(test_loader.dataset, 'test_resume')) and (test_loader.dataset.test_resume is True))
@@ -394,15 +511,22 @@ class BaseRunner(object):
                 you must always inference it with memory_friendly_infer=True'
         if self.memory_friendly_infer:
             writer = self._prepare_writer(resume=test_resume)
-        for _ in range(test_loader.get_epoch_size()):
-            batch = self.get_batch('test')
-            output = self.forward_eval(batch)
-            dump_results = test_loader.dataset.dump(output)
+        try:
+            for _ in range(test_loader.get_epoch_size()):
+                batch = self.get_batch('test')
+                output = self.forward_eval(batch)
+                dump_results = test_loader.dataset.dump(output)
+                if self.memory_friendly_infer:
+                    self._results2disk(dump_results, writer)
+                else:
+                    all_results_list.append(dump_results)
+        finally:
+            self._evaluating_batches = False
             if self.memory_friendly_infer:
-                self._results2disk(dump_results, writer)
-            else:
-                all_results_list.append(dump_results)
+                writer.close()
         barrier()
+        if getattr(test_loader.dataset, 'metrics_in_place', False):
+            return None
         all_device_results_list = None
         if not self.memory_friendly_infer:
             all_device_results_list = []
@@ -490,7 +614,19 @@ class BaseRunner(object):
             return self._evaluate()
 
     def _evaluate(self):
-        res_file, all_device_results_list = self.inference()
+        dataset = self.data_loaders['test'].dataset
+        active_model = self.ema.model if self.ema is not None else self.model
+        try:
+            if hasattr(dataset, 'begin_evaluation'):
+                dataset.begin_evaluation(active_model, self.device,
+                                         self.fp16 if self.training else self.execution.get('eval_half', False),
+                                         self.results_dir)
+            res_file, all_device_results_list = self.inference()
+            if hasattr(dataset, 'finish_evaluation'):
+                dataset.finish_evaluation()
+        finally:
+            if hasattr(dataset, 'restore_evaluation_dtype'):
+                dataset.restore_evaluation_dtype()
         if env.is_master():
             logger.info("begin evaluate")
             metrics = self.data_loaders['test'].dataset.evaluate(res_file, all_device_results_list)
@@ -504,6 +640,8 @@ class BaseRunner(object):
         try:
             self._hooks('after_eval', metrics)
         except BaseException:
+            if self.execution:
+                raise
             logger.warning('metrics type is incompatible for hook')
         self.set_cur_eval_iter()
         return metrics
@@ -512,7 +650,10 @@ class BaseRunner(object):
     def batch2device(self, batch):
         # 使用进程绑定的实际设备迁移整批数据，不再硬编码 cuda。
         model_dtype = torch.float32
-        return to_device(batch, device=self.device, dtype=model_dtype)
+        result = to_device(batch, device=self.device, dtype=model_dtype)
+        if self.execution.get('nested_tensor', False):
+            result['samples'] = batch['samples'].to(self.device)
+        return result
 
     def get_batch(self, batch_type='train'):
         if batch_type == 'train':
@@ -589,6 +730,8 @@ class BaseRunner(object):
 
     @property
     def cur_iter(self):
+        if self.execution:
+            return self._completed_batches
         if hasattr(self, "lr_scheduler"):
             return self.lr_scheduler.last_iter
 
@@ -609,7 +752,10 @@ class BaseRunner(object):
         self.train_epoch_size = self.data_loaders['train'].get_epoch_size()
 
     def set_train_batch_size(self):
-        self.train_batch_size = self.data_loaders['train'].batch_sampler.batch_size
+        loader = self.data_loaders['train']
+        self.train_batch_size = getattr(loader, 'batch_size', None)
+        if self.train_batch_size is None:
+            self.train_batch_size = loader.batch_sampler.batch_size
 
     def special_bn_init(self):
         for m in self.model.modules():
@@ -618,6 +764,11 @@ class BaseRunner(object):
                 m.momentum = 0.03
 
     def build_model(self):
+        if self.config['runtime'].get('audit_recipe', False):
+            from up.utils.general.recipe_audit import rng_snapshot
+            # UP builds loaders first; reference-model adapters build the model
+            # first. Capture here so the audit records the real initialization point.
+            self._before_model_rng = rng_snapshot(self.runtime)
         model_helper_type = self.config['runtime']['model_helper']['type']
         model_helper_kwargs = self.config['runtime']['model_helper']['kwargs']
         model_helper_ins = MODEL_HELPER_REGISTRY[model_helper_type]
@@ -694,7 +845,8 @@ class BaseRunner(object):
         return {'scaler': self.scaler.state_dict()}
 
     def get_dump_dict(self):
-        model_dict = self.model.state_dict()
+        model_dict = (self.model_components().state_dict() if self.execution
+                      else self.model.state_dict())
         dump_dict = {
             'epoch': self.cur_epoch(),
             'iter': self.cur_iter,
@@ -706,11 +858,29 @@ class BaseRunner(object):
             dump_dict.update(self.get_fp16_dump_dict())
         if self.ema is not None:
             dump_dict['ema'] = self.ema.state_dict()
+        if self.execution:
+            completed = self._completed_batches + int(self._batch_in_progress)
+            if self._last_update_batch != completed - 1:
+                raise RuntimeError('Save accumulated training only at an optimizer boundary')
+            dump_dict['execution'] = {
+                'completed_batches': completed,
+                'optimizer_updates': self.optimizer_updates,
+                'last_update_batch': self._last_update_batch,
+            }
+            dump_dict['iter'] = completed
+            dump_dict['component_state'] = {
+                name: module.training_state() for name, module in self.model_components().named_modules()
+                if hasattr(module, 'training_state')}
         return dump_dict
 
     def forward_model(self, batch):
         if self.ema is not None and not self.model.training:
             return self.ema.model(batch)
+        if (self.execution.get('unwrap_evaluation', False)
+                and getattr(self, '_evaluating_batches', False) and isinstance(self.model, DDP)):
+            # Official validators use the unwrapped network. Unequal validation
+            # shard lengths must not enter DDP's per-forward buffer broadcast.
+            return self.model.module(batch)
         return self.model(batch)
 
     def forward(self, batch, return_output=False):
@@ -720,15 +890,26 @@ class BaseRunner(object):
         else:
             output = self.forward_model(batch)
         self._temporaries['last_output'] = output
-        losses = [val for name, val in output.items() if name.find('loss') >= 0]
-        loss = sum(losses)
+        loss_key = self.execution.get('loss_key')
+        if loss_key is not None:
+            # Components are logging values, not extra copies of the total loss.
+            loss = output[loss_key]
+        else:
+            losses = [val for name, val in output.items() if name.find('loss') >= 0]
+            loss = sum(losses)
+        if self.execution.get('scale_loss_by_world_size', False):
+            loss = loss * env.world_size
         if return_output:
             return loss, output
         else:
             return loss
 
     def backward(self, loss):
-        self.model.zero_grad()
+        if not self.execution:
+            self.model.zero_grad()
+        elif self.execution.get('zero_grad_before_backward', False):
+            # Some reference loops clear after forward, before every backward.
+            self.optimizer.zero_grad()
         if self.backend == 'dist':
             if self.fp16:
                 self.scaler.scale(loss).backward()
@@ -740,11 +921,23 @@ class BaseRunner(object):
         return loss
 
     def update(self):
+        max_norm = self.execution.get('clip_max_norm')
+        if max_norm is not None:
+            if self.fp16:
+                self.scaler.unscale_(self.optimizer)
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm)
         if self.backend == 'dist' and self.fp16:
+            scale = self.scaler.get_scale()
             self.scaler.step(self.optimizer)
             self.scaler.update()
+            updated = self.scaler.get_scale() >= scale
         else:
             self.optimizer.step()
+            updated = True
+        if self.execution:
+            self.optimizer_updates += int(updated)
+            if not self.execution.get('zero_grad_before_backward', False):
+                self.optimizer.zero_grad()
         self._hooks('after_update', self.cur_iter)
 
     def get_total_iter(self):

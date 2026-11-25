@@ -3,3 +3,4 @@ from .saver_helper import * # noqa
 from .vis_helper import * # noqa
 from .checkpoint import * # noqa
 from .model_wrapper import * # noqa
+from .recipe_audit import RecipeAudit  # noqa: F401
