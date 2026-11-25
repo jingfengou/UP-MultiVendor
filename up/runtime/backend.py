@@ -2,10 +2,9 @@
 
 接口与注册方式见 docs/platform/ADDING_VENDOR.md。
 
-兼容本类接口的厂商 Torch 可直接复用。确需差异实现时，在交付插件
-vendor_plugins/<vendor>_runtime.py 中继承 RuntimeBackend，只覆盖不兼容
-的方法，再通过 register_backend(..., backend_class=..., replace=True) 注册。
-插件在 setup_runtime 之前加载，示例见 docs/platform/ADDING_VENDOR.md。
+昇腾和寒武纪在 up/platform/<vendor>/runtime.py 覆盖差异。独立交付的
+后端也可通过 register_backend(..., backend_class=..., replace=True)
+在 setup_runtime 前注册。示例见 docs/platform/ADDING_VENDOR.md。
 普通 nn/functional/Tensor/autograd 操作仍由厂商 Torch 执行，不在这里重写。
 """
 import importlib
@@ -23,7 +22,10 @@ _PLATFORMS = {
     'metax_cuda': ('cuda', 'nccl', None),
 }
 _runtime = None
-_backend_classes = {}
+_backend_classes = {
+    'ascend_npu': 'up.platform.ascend_npu.runtime',
+    'cambricon_mlu': 'up.platform.cambricon_mlu.runtime',
+}
 
 
 class RuntimeBackend:
@@ -216,6 +218,14 @@ def register_backend(platform, *, device_type, dist_backend, extension=None,
     _backend_classes[platform] = backend_class
 
 
+def _create_runtime(platform, purpose):
+    backend_class = _backend_classes.get(platform, RuntimeBackend)
+    # Resolve only the selected built-in adapter. External registrations take precedence.
+    if isinstance(backend_class, str):
+        backend_class = importlib.import_module(backend_class).Backend
+    return backend_class(platform, purpose=purpose)
+
+
 def setup_runtime(config, opts=None, *, purpose='training'):
     # 必须在创建工作进程/通信组之前解析厂商，训练和推理入口共用这一步。
     # Resolve the same --opts overrides as the runner, before creating workers/groups.
@@ -237,15 +247,14 @@ def setup_runtime(config, opts=None, *, purpose='training'):
             raise RuntimeError('The active platform/purpose is fixed; start a new process to change it')
         _runtime = None
     if _runtime is None:
-        _runtime = _backend_classes.get(platform, RuntimeBackend)(platform, purpose=purpose)
+        _runtime = _create_runtime(platform, purpose)
     return _runtime
 
 
 def get_runtime():
     global _runtime
     if _runtime is not None and _runtime.pid != os.getpid():
-        cls = _backend_classes.get(_runtime.platform, RuntimeBackend)
-        _runtime = cls(_runtime.platform, purpose=_runtime.purpose)
+        _runtime = _create_runtime(_runtime.platform, _runtime.purpose)
     if _runtime is None:
         _runtime = RuntimeBackend('nvidia')
     return _runtime

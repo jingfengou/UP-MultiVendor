@@ -8,6 +8,24 @@ import torch
 from torch.nn import functional as F
 
 
+def continuous_nms(boxes, scores, threshold):
+    """Same-device reference for continuous xyxy NMS with no coordinate offset."""
+    order = scores.argsort(descending=True)
+    area = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
+    keep = []
+    while order.numel():
+        index = order[0]
+        keep.append(index)
+        remaining = order[1:]
+        lt = torch.maximum(boxes[index, :2], boxes[remaining, :2])
+        rb = torch.minimum(boxes[index, 2:], boxes[remaining, 2:])
+        wh = (rb - lt).clamp(min=0)
+        intersection = wh[:, 0] * wh[:, 1]
+        iou = intersection / (area[index] + area[remaining] - intersection)
+        order = remaining[~(iou > threshold)]
+    return torch.stack(keep) if keep else order
+
+
 def naive_nms(dets, thresh, *, offset):
     """910B/MLU590 的共享 offset-NMS；C500 已绑定独立原生二进制。
 

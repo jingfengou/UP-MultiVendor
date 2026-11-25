@@ -9,12 +9,11 @@ API，明确各项应绑定现有 SDK、补共享实现，还是开发专用内�
 
 设备: torch_npu 注册的 npu 设备；不要将输入搬到 CUDA 或 CPU 代算。
 CANN 环境先核对 torch.npu/amp、HCCL 和显式 DNN 策略。
-设备/AMP 不兼容时另写 vendor_plugins/ascend_npu_runtime.py 的 RuntimeBackend
-子类并注册；不要在本算子文件改 Runner、模型或厂商选择逻辑。
+设备和 AMP 差异在同目录 runtime.py 处理。常规检测 NMS 的实现入口是 nms.py。
 
 当前 3 项已复用、13 项继承未实现报错；未接入不表示厂商 SDK 没有这个能力。
-五份默认配置中 YOLOX 的 GPU OTA 匹配需要 overlap；其他 15 项默认未用。
-常规检测 NMS 另走 up/platform/ops.py::nms，不是这里的 naive_nms。
+原版 UP YOLOX 的 GPU OTA 匹配会用到 overlap；其余算子按所用配置验收。
+常规检测 NMS 经 up/platform/ops.py 路由到同目录 nms.py。
 验收: 同操作数前向/所需梯度/状态/空输入，rtol=1e-4、atol=1e-5；
 索引按契约精确比较。记录本卡环境和结果，不用导入成功代替真机测试。
 """

@@ -2,6 +2,8 @@
 
 `RuntimeBackend` 提供设备与执行服务，`NativeOps` 提供专用操作。标准 Torch 操作直接复用厂商实现；不兼容部分在厂商后端处理，不复制模型或 Runner。
 
+寒武纪和昇腾的开发入口与平台验收项见 [寒武纪 MLU](../../up/platform/cambricon_mlu/) 和 [昇腾 NPU](../../up/platform/ascend_npu/)。两家目录按 `runtime.py`、`native_ops.py`、`nms.py` 分工。
+
 ## 厂商接入
 
 ### 1. 准备环境
@@ -38,29 +40,7 @@
 
 NPU / MLU 的显式 DNN 选项目前需要厂商映射；不支持的选项直接报错。不能把空函数或关闭 AMP 当作兼容实现。
 
-插件可放在独立包，通过 `PLUGINPATH` 在运行时初始化前加载：
-
-```python
-# vendor_plugins/ascend_runtime.py
-from up.runtime import register_backend
-from up.runtime.backend import RuntimeBackend
-
-class AscendRuntime(RuntimeBackend):
-    def configure_dnn(self, options=None, legacy_nocudnn=None):
-        # Replace with the verified CANN policy mapping.
-        raise NotImplementedError('Implement the requested CANN DNN policy')
-
-register_backend(
-    'ascend_npu', device_type='npu', dist_backend='hccl',
-    extension='torch_npu', backend_class=AscendRuntime, replace=True,
-)
-```
-
-```bash
-PLUGINPATH=vendor_plugins.ascend_runtime python -m up train --config configs/det/yolox/yolox_small.yaml --opts runtime.platform ascend_npu
-```
-
-模板中的报错须替换为真实策略实现。注册在 `setup_runtime()` 前完成，不能在训练途中切换。
+`runtime.platform=cambricon_mlu` 或 `ascend_npu` 会直接选中各自 `runtime.py` 的 `Backend` 类。公共启动器和子进程按同一配置选后端，在通信初始化前绑定逻辑卡号。独立分发的后端可由 `PLUGINPATH` 加载，在 `setup_runtime()` 前调用 `up.runtime.register_backend(..., backend_class=自定义类, replace=True)` 覆盖已有厂商。
 
 ### 3. 绑定专用操作
 
@@ -147,7 +127,7 @@ YOLOX、YOLO11 的普通检测 NMS 入口是 `up/platform/ops.py::nms(boxes, sco
 
 - NVIDIA 调用 TorchVision 的 GPU NMS。
 - C500 调用 `up/platform/metax_cuda/nms.py`，用当前厂商 Torch 排序，再由 `up/extensions/csrc/nms/continuous_nms.cu` 在 GPU 上计算重叠和完成筛选。按上面的 `UP_BUILD_PLATFORM=metax_cuda` 命令重新编译后使用。
-- 昇腾、寒武纪继续使用共享 Torch 实现；接入专用内核时，保留此入口的参数和输出。
+- 昇腾和寒武纪分别路由到各自目录的 `nms.py`。现有绑定使用共享 Torch 实现，厂商可在此替换为符合契约的内核。
 
 输入为连续坐标 `boxes[N,4]` 和同设备、同 dtype 的 `scores[N]`，输出为同设备的 int64 原框索引。按分数降序保留框，IoU **大于**阈值时抑制，无 `+1` 坐标偏移，也无反向。C500 保留原厂商排序对同分框的处理，支持 FP16、FP32、FP64；缺少已编译扩展时明确报错。这个入口与上表带 `offset` 的旧 `naive_nms` 分开。
 
@@ -161,5 +141,40 @@ YOLOX、YOLO11 的普通检测 NMS 入口是 `up/platform/ops.py::nms(boxes, sco
 - 专用内核：先定义统一契约和参考结果，再实现厂商内核。
 
 接入时核对前向、反向和状态，然后运行训练、训练内验证、保存加载、独立推理与多卡通信。保持原算子容差，缺失能力明确报错，不新增静默 CPU 代算。没有 PyTorch 设备后端的厂商还需完成设备注册、Tensor 存储、拷贝、派发、stream 与 autograd 桥接。
+
+### 5. 寒武纪与昇腾验收
+
+在匹配的厂商环境以及仓库根目录执行。将 `PLATFORM` 改为本次验收的平台。
+
+```bash
+PLATFORM=cambricon_mlu  # 或 ascend_npu
+PLATFORM="$PLATFORM" python - <<'PY'
+import os
+import torch
+from up.runtime import setup_runtime
+
+rt = setup_runtime({'runtime': {'platform': os.environ['PLATFORM']}})
+rt.set_device(0)
+value = torch.ones(2, device=rt.device, requires_grad=True)
+value.square().sum().backward()
+rt.module.synchronize()
+torch.testing.assert_close(value.grad.cpu(), torch.full((2,), 2.0))
+print(type(rt).__module__, rt.device, rt.dist_backend, torch.__version__)
+print(rt.native_ops.capabilities())
+PY
+```
+
+`capabilities()` 记录算子绑定情况。随后在配好数据和独立输出目录的 YAML 上验证公共训练入口：
+
+```bash
+python -m up train --ng 1 --config configs/cls/resnet/res50.yaml \
+  --opts runtime.platform "$PLATFORM"
+python -m up train --ng 1 --config configs/det/yolox/yolox_small.yaml \
+  --opts runtime.platform "$PLATFORM"
+```
+
+1. 固定初始化、输入和随机种子，记录 ResNet50 与 YOLOX-S 的单卡 FP32 前后向和优化器更新。YOLOX-S 验证 OTA `overlap`、常规 NMS 及输出索引所在设备。
+2. 按目标训练配置验证 AMP 溢出跳步、恢复 scaler，并用 `--ng 2` 检查双卡 DDP、集合通信及配置用到的 SyncBN。
+3. 用同一份 checkpoint 测试恢复训练、完整验证和独立推理。比较精度时保持官方配方与全局 batch 一致，记录提交、设备型号、Torch/SDK/驱动版本和实测结果。
 
 [架构说明](ARCHITECTURE.md) · [训练指南](TRAINING.md)

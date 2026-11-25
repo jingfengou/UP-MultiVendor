@@ -96,6 +96,8 @@ ResNet50、YOLOX、YOLO11 和官方 DETR 配置位于 [`configs/benchmarks/three
 
 设备、AMP、通信和计算库策略通过 `RuntimeBackend` 扩展；专用操作在 `up/platform/<vendor>/native_ops.py` 中绑定。标准 Torch 操作直接使用当前厂商环境。厂商不支持的接口明确报错，所需实现及注册方式见 [厂商接入指南](docs/platform/ADDING_VENDOR.md)。
 
+**开发交接（待真机验收）**：[寒武纪 MLU](up/platform/cambricon_mlu/) · [昇腾 NPU](up/platform/ascend_npu/)。各目录包含运行时、专用算子和检测 NMS 的实现入口及验收说明。
+
 [架构说明](docs/platform/ARCHITECTURE.md) · [训练指南](docs/platform/TRAINING.md) · [厂商接入](docs/platform/ADDING_VENDOR.md) · [接口浏览](docs/platform/HANDOFF.html)
 
 原版 UP 保留其 [Apache-2.0 许可](LICENSE)。外部模型源码和依赖的来源、版本与各自许可见设计文档。
