@@ -28,7 +28,7 @@ dataset:
         transformer:
         - type: mosaic
           kwargs: {extra_input: true, tar_size: 640, fill_color: 114}
-        - type: random_perspective_yolox
+        - type: yolox_megvii_affine
           kwargs:
             degrees: 10.0
             translate: 0.1
@@ -44,7 +44,8 @@ dataset:
             mixup_scale: [0.5, 1.5]
             flip_prob: 0.5
             fill_color: 114
-        - &hsv !include yolox_s.yaml//augment_hsv
+            megvii_labels: true
+        - &hsv {type: yolox_additive_hsv}
         - &flip !include yolox_s.yaml//flip
         - &train_resize
           type: keep_ar_resize_max
@@ -119,3 +120,6 @@ net: !include yolox_s.yaml//net
 export: !include yolox_s.yaml//export
 override@:
   trainer.lr_scheduler.warmup_ratio: 0.0
+  net.0.kwargs.focus_type: yolox_focus
+  net.1.kwargs.csp_shortcut: false
+  net.3.kwargs.all_reduce_norm: false

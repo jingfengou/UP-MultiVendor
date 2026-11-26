@@ -54,7 +54,7 @@ python -m up train --config $CFG --ng 4 --launch pytorch --opts runtime.platform
 
 ResNet50、YOLOX 替换配置、初始化文件和输出目录。每家先进入对应 Torch 环境，再选择 `runtime.platform`；配置不会自动安装或替换 Torch。
 
-Megvii 对齐的 YOLOX-S 配置使用当前工作目录下的 `coco/` 数据路径，输出到 `outputs/`。从新的 AFS 运行目录启动：
+Megvii 对齐的 YOLOX-S 配置使用当前工作目录下的 `coco/` 数据路径，输出到 `outputs/`。训练时使用按原点变换的 Mosaic 仿射、加法 HSV 和每卡正样本数归一化损失。评估历史权重时，选用该权重归档的网络配置和源码。NVIDIA 环境需先在源码目录运行 `UP_BUILD_PLATFORM=nvidia python setup.py build_ext --inplace`，供 SimOTA 和 NMS 加载原生算子。可在新的 AFS 运行目录执行以下命令。
 
 ```bash
 RUN=/data/up-runs/yolox-s-megvii-aligned

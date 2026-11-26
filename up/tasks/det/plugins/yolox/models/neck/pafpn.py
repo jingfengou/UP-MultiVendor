@@ -25,7 +25,8 @@ class YoloxPAFPN(nn.Module):
                  upsample='nearest',
                  align_corners=True,
                  normalize={'type': 'solo_bn'},
-                 downsample_plane=256):
+                 downsample_plane=256,
+                 csp_shortcut=True):
         super(YoloxPAFPN, self).__init__()
         self.inplanes = inplanes
         in_channels = copy.deepcopy(inplanes)
@@ -45,7 +46,7 @@ class YoloxPAFPN(nn.Module):
         )
         self.C3_p4 = CSPLayer(
             int(2 * in_channels[1]), int(in_channels[1]),
-            n=round(3 * depth), shortcut=False, depthwise=depthwise, act=act_fn, normalize=normalize
+            n=round(3 * depth), shortcut=csp_shortcut, depthwise=depthwise, act=act_fn, normalize=normalize
         )
 
         self.reduce_conv1 = ConvBnAct(
@@ -54,7 +55,7 @@ class YoloxPAFPN(nn.Module):
         )
         self.C3_p3 = CSPLayer(
             int(2 * in_channels[0]), int(in_channels[0]),
-            n=round(3 * depth), shortcut=False, depthwise=depthwise, act=act_fn, normalize=normalize
+            n=round(3 * depth), shortcut=csp_shortcut, depthwise=depthwise, act=act_fn, normalize=normalize
         )
 
         # bottom-up conv
@@ -64,7 +65,7 @@ class YoloxPAFPN(nn.Module):
         )
         self.C3_n3 = CSPLayer(
             int(2 * in_channels[0]), int(in_channels[1]),
-            n=round(3 * depth), shortcut=False, depthwise=depthwise, act=act_fn, normalize=normalize
+            n=round(3 * depth), shortcut=csp_shortcut, depthwise=depthwise, act=act_fn, normalize=normalize
         )
 
         # bottom-up conv
@@ -74,7 +75,7 @@ class YoloxPAFPN(nn.Module):
         )
         self.C3_n4 = CSPLayer(
             int(2 * in_channels[1]), int(in_channels[2]),
-            n=round(3 * depth), shortcut=False, depthwise=depthwise, act=act_fn, normalize=normalize
+            n=round(3 * depth), shortcut=csp_shortcut, depthwise=depthwise, act=act_fn, normalize=normalize
         )
 
         for i in range(self.num_level - len(inplanes)):

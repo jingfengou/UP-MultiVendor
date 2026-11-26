@@ -192,12 +192,8 @@ net:
     - 8
     - 16
     - 32
-    focus_type: yolox_focus
     normalize:
       type: solo_bn
-      kwargs:
-        eps: 0.001
-        momentum: 0.03
     act_fn:
       type: Silu
 - name: neck
@@ -209,11 +205,6 @@ net:
     - 8
     - 16
     - 32
-    normalize:
-      type: solo_bn
-      kwargs:
-        eps: 0.001
-        momentum: 0.03
     act_fn:
       type: Silu
 - name: roi_head
@@ -223,11 +214,6 @@ net:
     num_classes: 81
     width: 0.5
     num_point: 1
-    normalize:
-      type: solo_bn
-      kwargs:
-        eps: 0.001
-        momentum: 0.03
     act_fn:
       type: Silu
 - name: yolox_post

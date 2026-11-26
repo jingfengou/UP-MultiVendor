@@ -65,7 +65,6 @@ class YoloxBatchResize(Hook):
         super(YoloxBatchResize, self).__init__(runner)
         self.input_size = input_size
         self.interval = interval
-        self.iter_count = 0
         self.resizer = Multiscale(
             random_size=random_size,
             scale_step=scale_step,
@@ -74,7 +73,9 @@ class YoloxBatchResize(Hook):
         self.resizer.cur_size = [input_size, input_size]
 
     def before_forward(self, cur_iter, input):
-        if self.iter_count and self.iter_count % self.interval == 0:
+        if cur_iter > 0 and cur_iter % self.interval == 0:
             self.resizer.cur_size = self.resizer.get_target_size(input)
         self.resizer.rescale(input)
-        self.iter_count += 1
+        # SimOTA clamps centers using the current canvas dimensions.
+        for info in input['image_info']:
+            info[:2] = self.resizer.cur_size
