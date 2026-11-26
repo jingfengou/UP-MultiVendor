@@ -219,7 +219,8 @@ class BaseRunner(object):
         self.build_global_flags()
         rank_init = self.config['runtime']['rank_init']
         random_seed = self.config['runtime']['random_seed']
-        set_random_seed(random_seed, rank_init)
+        if random_seed is not None:
+            set_random_seed(random_seed, rank_init)
         self.runtime.configure_dnn(self.config['runtime'].get('dnn'),
                                    legacy_nocudnn=self.args.get('nocudnn', False))
         logger.info(f'world size:{env.world_size}')
@@ -371,7 +372,8 @@ class BaseRunner(object):
                     from up.utils.env.dist_helper import all_reduce_norm
                     logger.info("all reduce norm")
                     all_reduce_norm(self.model)
-                    if self.ema is not None:
+                    sync_ema_norm = self.config['runtime'].get('ema_async_norm', True)
+                    if self.ema is not None and sync_ema_norm:
                         all_reduce_norm(self.ema.model)
                 self.evaluate()
             if self.only_save_latest:

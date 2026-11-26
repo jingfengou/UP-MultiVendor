@@ -165,7 +165,9 @@ net:
   kwargs:
     out_layers: [2, 3, 4]
     out_strides: [8, 16, 32]
-    normalize: {type: solo_bn}
+    normalize: &yolox_bn
+      type: solo_bn
+      kwargs: {eps: 0.001, momentum: 0.03}
     act_fn: {type: Silu}
 - name: neck
   prev: backbone
@@ -173,6 +175,7 @@ net:
   kwargs:
     depth: 0.33
     out_strides: [8, 16, 32]
+    normalize: *yolox_bn
     act_fn: {type: Silu}
 - name: roi_head
   prev: neck
@@ -181,6 +184,7 @@ net:
     num_classes: *num_classes
     width: 0.5
     num_point: &dense_points 1
+    normalize: *yolox_bn
     act_fn: {type: Silu}
 - name: yolox_post
   prev: roi_head
