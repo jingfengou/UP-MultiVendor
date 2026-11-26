@@ -37,7 +37,7 @@ unzip coco2017labels-segments.zip -d /data
 | 训练收尾 | 保留分类增强 | 最后 15 轮关闭强增强并切换原训练阶段 | 最后 10 轮关闭 Mosaic、MixUp、CopyPaste |
 | EMA | 不启用 | UP EMA | Ultralytics EMA |
 
-完整参数以 YAML 为准。原 YOLOX-S 三厂商配置保留原始 UP 配方；Megvii 对齐任务使用单独配置，固定全局 BS64、作者 BN（`eps=1e-3`、`momentum=0.03`）、480–800 按 batch 多尺度、每 10 轮验证并在第 285 轮切换 no-aug，EMA BN 不做额外跨卡平均。该配方的 `random_seed: null` 不主动设置全局随机种子，对应 Megvii `Exp.seed=None` 默认值。ResNet50 和 YOLOX 仍使用 UP BaseRunner；YOLO11 的网络、损失、增强和 EMA 使用 `ultralytics==8.3.225`。从零训练时使用公共随机初始化，不加载已训练权重。原生运行不强制确定性，TF32 关闭；厂商计算库开关见 [接入指南](ADDING_VENDOR.md)。
+完整参数以 YAML 为准。原 YOLOX-S 三厂商配置保留原始 UP 配方；Megvii 对齐任务使用单独配置，使用作者 Focus 通道顺序和无残差 PAFPN CSP 层，并固定全局 BS64、作者 BN（`eps=1e-3`、`momentum=0.03`）、480–800 按 batch 多尺度、每 10 轮验证并在第 285 轮切换 no-aug，EMA BN 不做额外跨卡平均。该配方的 `random_seed: null` 不主动设置全局随机种子，对应 Megvii `Exp.seed=None` 默认值。ResNet50 和 YOLOX 仍使用 UP BaseRunner；YOLO11 的网络、损失、增强和 EMA 使用 `ultralytics==8.3.225`。从零训练时使用公共随机初始化，不加载已训练权重。原生运行不强制确定性，TF32 关闭；厂商计算库开关见 [接入指南](ADDING_VENDOR.md)。
 
 ## 初始化与训练
 

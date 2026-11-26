@@ -165,6 +165,7 @@ net:
   kwargs:
     out_layers: [2, 3, 4]
     out_strides: [8, 16, 32]
+    focus_type: yolox_focus
     normalize: &yolox_bn
       type: solo_bn
       kwargs: {eps: 0.001, momentum: 0.03}

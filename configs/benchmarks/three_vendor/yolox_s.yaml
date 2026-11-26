@@ -192,6 +192,7 @@ net:
     - 8
     - 16
     - 32
+    focus_type: yolox_focus
     normalize:
       type: solo_bn
       kwargs:

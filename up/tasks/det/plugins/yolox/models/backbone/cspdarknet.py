@@ -61,6 +61,28 @@ class DWConv(nn.Module):
         return self.pconv(x)
 
 
+class YoloxFocus(nn.Module):
+    def __init__(self, in_channels, out_channels, normalize, act_fn, kernel_size=3):
+        super().__init__()
+        self.conv = ConvBnAct(
+            in_channels * 4,
+            out_channels,
+            kernel_size=kernel_size,
+            stride=1,
+            normalize=normalize,
+            act_fn=act_fn,
+        )
+
+    def forward(self, x):
+        patches = (
+            x[..., ::2, ::2],
+            x[..., 1::2, ::2],
+            x[..., ::2, 1::2],
+            x[..., 1::2, 1::2],
+        )
+        return self.conv(torch.cat(patches, dim=1))
+
+
 class Bottleneck(nn.Module):
     # Standard bottleneck
     def __init__(
@@ -140,6 +162,14 @@ class CSPDarknet(nn.Module):
         if focus_type == 'v5_focus':
             self.stem = Focus(input_channels, base_channels,
                               kernel_size=3, normalize=normalize, act_fn=act_fn)
+        elif focus_type == 'yolox_focus':
+            self.stem = YoloxFocus(
+                input_channels,
+                base_channels,
+                kernel_size=3,
+                normalize=normalize,
+                act_fn=act_fn,
+            )
         elif focus_type == 'v4_focus':
             self.stem = nn.Sequential(
                 ConvBnAct(
