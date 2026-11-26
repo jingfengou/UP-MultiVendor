@@ -8,6 +8,7 @@
 |---|---|---:|---|---:|---:|
 | [ResNet50](../../configs/benchmarks/three_vendor/resnet50.yaml) | ImageNet-1K | 100 | 224 | 4 × 256 | 256 |
 | [YOLOX-S](../../configs/benchmarks/three_vendor/yolox_s.yaml) | COCO2017 | 300 | 训练 480–800，验证 640 | 4 × 8 | 8 |
+| [YOLOX-S · Megvii 配方对齐](../../configs/benchmarks/three_vendor/yolox_s_megvii_aligned.yaml) | COCO2017 | 300 | 训练 480–800，验证 640 | 4 × 16 | 16 |
 | [YOLO11s](../../configs/benchmarks/three_vendor/yolo11s.yaml) | COCO2017 | 600 | 640，验证矩形补边 | 4 × 32 | 64 |
 | [DETR-R50](../../configs/benchmarks/three_vendor/detr_r50_official.yaml) | COCO2017 | 500 | 官方多尺度；验证短边 800、长边不超过 1333 | 4 × 4 | 最终验证 2 |
 
@@ -36,7 +37,7 @@ unzip coco2017labels-segments.zip -d /data
 | 训练收尾 | 保留分类增强 | 最后 15 轮关闭强增强并切换原训练阶段 | 最后 10 轮关闭 Mosaic、MixUp、CopyPaste |
 | EMA | 不启用 | UP EMA | Ultralytics EMA |
 
-完整参数以 YAML 为准。ResNet50 和 YOLOX 沿用 UP 配方；YOLO11 的网络、损失、增强和 EMA 使用 `ultralytics==8.3.225`。从零训练时使用公共随机初始化，不加载已训练权重。原生运行不强制确定性，TF32 关闭；厂商计算库开关见 [接入指南](ADDING_VENDOR.md)。
+完整参数以 YAML 为准。原 YOLOX-S 三厂商配置保留原始 UP 配方；Megvii 对齐任务使用单独配置，使用作者 Focus 通道顺序和无残差 PAFPN CSP 层，并固定全局 BS64、作者 BN（`eps=1e-3`、`momentum=0.03`）、480–800 按 batch 多尺度、每 10 轮验证并在第 285 轮切换 no-aug，EMA BN 不做额外跨卡平均。该配方的 `random_seed: null` 不主动设置全局随机种子，对应 Megvii `Exp.seed=None` 默认值。ResNet50 和 YOLOX 仍使用 UP BaseRunner；YOLO11 的网络、损失、增强和 EMA 使用 `ultralytics==8.3.225`。从零训练时使用公共随机初始化，不加载已训练权重。原生运行不强制确定性，TF32 关闭；厂商计算库开关见 [接入指南](ADDING_VENDOR.md)。
 
 ## 初始化与训练
 
@@ -52,6 +53,18 @@ python -m up train --config $CFG --ng 4 --launch pytorch --opts runtime.platform
 ```
 
 ResNet50、YOLOX 替换配置、初始化文件和输出目录。每家先进入对应 Torch 环境，再选择 `runtime.platform`；配置不会自动安装或替换 Torch。
+
+Megvii 对齐的 YOLOX-S 配置使用当前工作目录下的 `coco/` 数据路径，输出到 `outputs/`。训练时使用按原点变换的 Mosaic 仿射、加法 HSV 和每卡正样本数归一化损失。评估历史权重时，选用该权重归档的网络配置和源码。NVIDIA 环境需先在源码目录运行 `UP_BUILD_PLATFORM=nvidia python setup.py build_ext --inplace`，供 SimOTA 和 NMS 加载原生算子。可在新的 AFS 运行目录执行以下命令。
+
+```bash
+RUN=/data/up-runs/yolox-s-megvii-aligned
+mkdir -p "$RUN"
+ln -s /data/coco "$RUN/coco"
+cd "$RUN"
+PYTHONPATH=/path/to/UP-MultiVendor python -m up train \
+  --config /path/to/UP-MultiVendor/configs/benchmarks/three_vendor/yolox_s_megvii_aligned.yaml \
+  --ng 4 --launch pytorch --opts runtime.platform nvidia
+```
 
 ## 验证与恢复
 

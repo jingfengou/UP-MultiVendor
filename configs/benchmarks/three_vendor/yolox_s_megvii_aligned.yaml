@@ -1,0 +1,125 @@
+# Megvii YOLOX-S recipe with UP BaseRunner and registered UP components.
+# Run from a fresh output directory containing a `coco` symlink.
+num_classes: !include yolox_s.yaml//num_classes
+runtime:
+  platform: nvidia
+  runner: {type: base}
+  expected_world_size: 4
+  fp16: true
+  random_seed: null
+  rank_init: false
+  dnn: {benchmark: true, deterministic: false, allow_tf32: false}
+  aligned: true
+  async_norm: true
+  ema_async_norm: false
+  special_bn_init: true
+  task_names: det
+
+dataset:
+  train:
+    dataset:
+      type: coco
+      kwargs:
+        meta_file: coco/annotations/instances_train2017.json
+        include_unannotated: true
+        image_reader:
+          type: fs_opencv
+          kwargs: {image_dir: coco/train2017, color_mode: BGR}
+        transformer:
+        - type: mosaic
+          kwargs: {extra_input: true, tar_size: 640, fill_color: 114}
+        - type: yolox_megvii_affine
+          kwargs:
+            degrees: 10.0
+            translate: 0.1
+            scale: [0.1, 2.0]
+            shear: 2.0
+            perspective: 0.0
+            fill_color: 114
+            border: [-320, -320]
+        - type: yolox_mixup_cv2
+          kwargs:
+            extra_input: true
+            input_size: [640, 640]
+            mixup_scale: [0.5, 1.5]
+            flip_prob: 0.5
+            fill_color: 114
+            megvii_labels: true
+        - &hsv {type: yolox_additive_hsv}
+        - &flip !include yolox_s.yaml//flip
+        - &train_resize
+          type: keep_ar_resize_max
+          kwargs: {max_size: 640, padding_type: left_top, padding_val: 114}
+        - &to_tensor !include yolox_s.yaml//to_tensor
+    batch_sampler:
+      type: base
+      kwargs:
+        sampler: {type: dist, kwargs: {}}
+        batch_size: 16
+  test:
+    dataset:
+      type: coco
+      kwargs:
+        meta_file: &val_annotations coco/annotations/instances_val2017.json
+        include_unannotated: true
+        image_reader:
+          type: fs_opencv
+          kwargs: {image_dir: coco/val2017, color_mode: BGR}
+        transformer:
+        - type: keep_ar_resize_max
+          kwargs: {max_size: 640, padding_type: left_top, padding_val: 114}
+        - *to_tensor
+        evaluator:
+          type: COCO
+          kwargs: {gt_file: *val_annotations, iou_types: [bbox], cmp_key: bbox.AP}
+    batch_sampler:
+      type: base
+      kwargs:
+        sampler: {type: dist, kwargs: {}}
+        batch_size: 16
+  dataloader:
+    type: base
+    kwargs:
+      num_workers: 4
+      alignment: 32
+      worker_init: false
+      pin_memory: true
+      pad_type: batch_pad
+      pad_value: 114
+
+trainer:
+  max_epoch: &max_epoch 300
+  test_freq: 10
+  save_freq: 5
+  only_save_latest: false
+  optimizer: !include yolox_s.yaml//trainer.optimizer
+  lr_scheduler: !include yolox_s.yaml//trainer.lr_scheduler
+
+saver:
+  save_dir: outputs/checkpoints
+  results_dir: outputs/results
+  auto_resume: false
+
+hooks:
+- type: yolox_noaug
+  kwargs:
+    no_aug_epoch: 16
+    max_epoch: *max_epoch
+    switch_before_data: true
+    test_freq: 1
+    save_freq: 5
+    transformer: [*hsv, *flip, *train_resize, *to_tensor]
+- type: yolox_batch_resize
+  kwargs: {input_size: 640, random_size: [15, 25], interval: 10}
+- type: auto_save_best
+- type: auto_save_metric
+  kwargs: {metric_json: outputs/results/metrics.json}
+
+ema: !include yolox_s.yaml//ema
+net: !include yolox_s.yaml//net
+export: !include yolox_s.yaml//export
+override@:
+  trainer.lr_scheduler.warmup_ratio: 0.0
+  net.0.kwargs.focus_type: yolox_focus
+  net.1.kwargs.csp_shortcut: false
+  net.3.kwargs.all_reduce_norm: false

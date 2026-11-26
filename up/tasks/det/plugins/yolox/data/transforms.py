@@ -12,7 +12,7 @@ from up.tasks.det.plugins.yolov5.data.transforms import RandomPespective, box_ca
 from up.data.datasets.transforms import Augmentation
 from up.utils.general.registry_factory import AUGMENTATION_REGISTRY
 
-__all__ = ['YoloXRandomPespective', 'YoloxMixUp_cv2']
+__all__ = ['YoloXRandomPespective', 'YoloxMegviiAffine', 'YoloxAdditiveHSV', 'YoloxMixUp_cv2']
 
 
 @AUGMENTATION_REGISTRY.register('random_perspective_yolox')
@@ -74,6 +74,53 @@ class YoloXRandomPespective(RandomPespective):
         return M, s
 
 
+@AUGMENTATION_REGISTRY.register('yolox_megvii_affine')
+class YoloxMegviiAffine(YoloXRandomPespective):
+    """Crop the mosaic from its origin. Keep clipped boxes for the final size filter."""
+
+    def generate_trans_matrix(self, img, width, height):
+        angle = random.uniform(-self.degrees, self.degrees)
+        scale = random.uniform(*self.scale)
+        rotation = cv2.getRotationMatrix2D((0, 0), angle, scale)
+        shear_x, shear_y = (math.tan(math.radians(random.uniform(-self.shear, self.shear))) for _ in range(2))
+        matrix = np.eye(3)
+        matrix[:2] = np.array([[1., shear_y], [shear_x, 1.]]) @ rotation
+        matrix[0, 2] = random.uniform(-self.translate, self.translate) * width
+        matrix[1, 2] = random.uniform(-self.translate, self.translate) * height
+        return matrix, scale
+
+    def label_transform(self, targets, matrix, width, height, scale):
+        result = targets.clone()
+        if result.shape[1] == 5:
+            result = result[result[:, 4] > 0]  # UP may represent an empty GT by a zero row.
+        if not len(result):
+            return result
+        corners = result[:, [0, 1, 2, 3, 0, 3, 2, 1]].double().reshape(-1, 4, 2)
+        affine = torch.as_tensor(matrix[:2], device=result.device, dtype=corners.dtype)
+        corners = corners @ affine[:, :2].T + affine[:, 2]
+        bounds = torch.cat((corners.amin(dim=1), corners.amax(dim=1)), dim=1)
+        result[:, [0, 2]] = bounds[:, [0, 2]].clamp(0, width).to(result.dtype)
+        result[:, [1, 3]] = bounds[:, [1, 3]].clamp(0, height).to(result.dtype)
+        return result
+
+
+@AUGMENTATION_REGISTRY.register('yolox_additive_hsv')
+class YoloxAdditiveHSV(Augmentation):
+    """Megvii's independently gated additive HSV perturbations for BGR images."""
+
+    def augment(self, data):
+        if not (data.gt_bboxes[:, 4] > 0).any():
+            return data
+        delta = np.random.uniform(-1., 1., 3) * [5, 30, 30]
+        delta = (delta * np.random.randint(0, 2, 3)).astype(np.int16)
+        hsv = cv2.cvtColor(data.image, cv2.COLOR_BGR2HSV).astype(np.int16) + delta
+        hsv[..., 0] %= 180
+        hsv[..., 1:] = hsv[..., 1:].clip(0, 255)
+        output = copy.copy(data)
+        output.image = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2BGR)
+        return output
+
+
 @AUGMENTATION_REGISTRY.register('yolox_mixup_cv2')
 class YoloxMixUp_cv2(Augmentation):
     def __init__(self,
@@ -83,7 +130,8 @@ class YoloxMixUp_cv2(Augmentation):
                  dataset=None,
                  flip_prob=1,
                  fill_color=0,
-                 clip_box=True):
+                 clip_box=True,
+                 megvii_labels=False):
         super(YoloxMixUp_cv2, self).__init__()
         assert extra_input and dataset is not None
         self.dataset = dataset
@@ -92,8 +140,11 @@ class YoloxMixUp_cv2(Augmentation):
         self.flip_prob = flip_prob
         self.fill_color = fill_color
         self.clip_box = clip_box
+        self.megvii_labels = megvii_labels
 
     def augment(self, data):
+        if self.megvii_labels and not (data.gt_bboxes[:, 4] > 0).any():
+            return data
         jit_factor = random.uniform(*self.mixup_scale)
         FLIP = random.uniform(0, 1) > self.flip_prob
 
@@ -104,6 +155,9 @@ class YoloxMixUp_cv2(Augmentation):
 
         # cp data
         idx_other = np.random.randint(0, len(self.dataset))
+        if self.megvii_labels:
+            while not self.dataset.get_image_classes(idx_other):
+                idx_other = random.randrange(len(self.dataset))
         data_other = self.dataset.get_input(idx_other)
         img = data_other['image']
         cp_labels = np.array(data_other['gt_bboxes'])
@@ -189,7 +243,10 @@ class YoloxMixUp_cv2(Augmentation):
                 cp_bboxes_transformed_np[:, 1::2], 0, target_h
             )
 
-        keep_list = box_candidates(cp_bboxes_origin_np.T, cp_bboxes_transformed_np.T, 5)
+        if self.megvii_labels:
+            keep_list = cp_labels[:, 4] > 0
+        else:
+            keep_list = box_candidates(cp_bboxes_origin_np.T, cp_bboxes_transformed_np.T, 5)
 
         if keep_list.sum() >= 1.0:
             cls_labels = cp_labels[keep_list, 4:5].copy()
