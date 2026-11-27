@@ -1,7 +1,7 @@
 # FAIR fb.resnet.torch ResNet-50 ImageNet recipe using native UP components.
 # UP_IMAGENET_ROOT contains train/, val/ and meta/{train,val}.txt in UP format.
 # Set UP_FAIR_OUTPUT_ROOT to a fresh AFS run directory.
-num_classes: !include resnet50.yaml//num_classes
+num_classes: !include ../_components/resnet50.yaml//num_classes
 runtime:
   task_names: cls
   platform: nvidia
@@ -27,17 +27,17 @@ dataset:
           kwargs: {size: 224, scale: [0.08, 1.0], interpolation: bicubic}
         - type: torch_color_jitter
           kwargs: {brightness: 0.4, contrast: 0.4, saturation: 0.4}
-        - !include resnet50.yaml//to_tensor
+        - !include ../_components/resnet50.yaml//to_tensor
         - type: imagenet_pca_lighting
           kwargs: {std: 0.1}
-        - !include resnet50.yaml//normalize
-        - !include resnet50.yaml//random_horizontal_flip
+        - !include ../_components/resnet50.yaml//normalize
+        - !include ../_components/resnet50.yaml//random_horizontal_flip
     batch_sampler: &batch_sampler
       type: base
       kwargs:
         sampler: {type: dist, kwargs: {}}
         batch_size: 64 # 4 ranks x 64 images = 256.
-    dataloader: !include resnet50.yaml//dataset.train.dataloader
+    dataloader: !include ../_components/resnet50.yaml//dataset.train.dataloader
   test:
     dataset:
       type: cls
@@ -49,12 +49,12 @@ dataset:
         transformer:
         - type: torch_resize
           kwargs: {size: 256, interpolation: bicubic}
-        - !include resnet50.yaml//center_crop
-        - !include resnet50.yaml//to_tensor
-        - !include resnet50.yaml//normalize
-        evaluator: !include resnet50.yaml//dataset.test.dataset.kwargs.evaluator
+        - !include ../_components/resnet50.yaml//center_crop
+        - !include ../_components/resnet50.yaml//to_tensor
+        - !include ../_components/resnet50.yaml//normalize
+        evaluator: !include ../_components/resnet50.yaml//dataset.test.dataset.kwargs.evaluator
     batch_sampler: *batch_sampler
-    dataloader: !include resnet50.yaml//dataset.test.dataloader
+    dataloader: !include ../_components/resnet50.yaml//dataset.test.dataloader
 
 trainer:
   max_epoch: 90
@@ -82,12 +82,12 @@ hooks:
   kwargs: {metric_json: "${UP_FAIR_OUTPUT_ROOT}/results/metrics.json"}
 - type: recipe_audit
 net:
-- !include resnet50.yaml//net.0
-- !include resnet50.yaml//net.1
+- !include ../_components/resnet50.yaml//net.0
+- !include ../_components/resnet50.yaml//net.1
 - name: post_process
   type: base_cls_postprocess
   kwargs:
     cls_loss: {type: ce}
-export: !include resnet50.yaml//export
+export: !include ../_components/resnet50.yaml//export
 override@:
   net.0.kwargs.initializer: {method: msra, mode: fan_out, a: 0}
