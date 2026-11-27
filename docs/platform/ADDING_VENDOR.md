@@ -166,7 +166,7 @@ print(rt.native_ops.capabilities())
 PY
 ```
 
-`capabilities()` 记录算子绑定情况。随后在配好数据和独立输出目录的 YAML 上验证公共训练入口：
+`capabilities()` 记录算子绑定情况。随后在配好数据和独立输出目录的 YAML 上验证公共训练入口。下方的 `res50.yaml` 和 `yolox_small.yaml` 是验证平台设备、算子和公共 Runner 的通用 smoke-test 配置，不是当前正式精度对比配方；跨厂商 benchmark 应使用[四模型训练与评测交接](FOUR_MODEL_RUNBOOK.md)表格中的唯一主 YAML：
 
 ```bash
 python -m up train --ng 1 --config configs/cls/resnet/res50.yaml \

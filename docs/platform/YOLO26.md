@@ -1,130 +1,91 @@
 # YOLO26 训练与使用
 
-**新训练使用 [统一 UP 训练配方](REFERENCE_RECIPES.md)。** 新插件位于 `up/tasks/det/plugins/yolo26/`，由 UP `BaseRunner` 管理训练、验证和检查点，图片推理使用 `BaseInference`。模型特有的规则分别放在 `models/`、`data/` 和 `utils/`。
+YOLO26s 检测与分类的正式对比统一使用 [`yolo26s_detect.yaml`](../../configs/benchmarks/reference_aligned/yolo26s_detect.yaml) 和 [`yolo26s_classify.yaml`](../../configs/benchmarks/reference_aligned/yolo26s_classify.yaml)，并由 UP `BaseRunner` 训练、验证和保存 checkpoint。旧包装器配置已清理，不再作为受支持的训练入口。
 
-## 旧入口兼容用法
+| 任务 | 唯一 benchmark 配置 | 全局 batch | Epoch | 训练精度 |
+|---|---|---:|---:|---|
+| YOLO26s COCO 检测 | [yolo26s_detect.yaml](../../configs/benchmarks/reference_aligned/yolo26s_detect.yaml) | 128 | 70 | AMP |
+| YOLO26s ImageNet 分类 | [yolo26s_classify.yaml](../../configs/benchmarks/reference_aligned/yolo26s_classify.yaml) | 256 | 200 | AMP |
 
-以下命令供已有任务继续使用。检测和分类共用 `up/tasks/yolo26/` 旧入口，调用各自固定版本的官方训练器。它与新的 `reference_aligned/` 配方采用不同的种子和训练设置，请分别使用对应配置与检查点。
+## 环境与数据
 
-| 任务 | 配置 | 初始化 | 轮数 / 尺寸 | 四卡训练 batch |
-|---|---|---|---|---|
-| YOLO26s 检测 | [yolo26s_coco70.yaml](../../configs/det/yolo26/yolo26s_coco70.yaml) | 官方 Objects365 150 轮权重，再构造 COCO 80 类头 | 70 / 640 | 4 × 32 = 128 |
-| YOLO26s-cls 分类 | [yolo26s_imagenet200.yaml](../../configs/cls/yolo26/yolo26s_imagenet200.yaml) | 公共随机初始化 | 200 / 224 | 4 × 64 = 256 |
-
-两家统一 seed 131、AMP FP16、TF32 关闭。分类显式使用 **SGD，初始学习率 0.1，200 轮余弦衰减**，对齐发布权重中的实际学习率记录。固定的 v8.4.0 代码在 `optimizer: auto` 时会改用 `0.01`，因此这里明确指定 SGD；插件会检查优化器和各参数组的初始学习率，训练恢复后也会检查。检测使用官方 **MuSGD**。
-
-## 1. 准备环境与官方代码
-
-先按 [README](../../README.md#安装与选择厂商) 安装对应厂商 Torch 和 UP 原生扩展，再安装辅助依赖：
+分别进入 NVIDIA 或沐曦的独立 Torch 环境，安装 UP 依赖及 YOLO26 辅助依赖：
 
 ```bash
+python -m pip install -r requirements.txt
 python -m pip install --no-deps -r requirements/yolo26.txt
-
-git clone https://github.com/ultralytics/ultralytics.git /opt/yolo26-detect
-git -C /opt/yolo26-detect checkout 557e95b99c24c5b0d4eb5973d5d54a20a799566a
-git clone --branch v8.4.0 --depth 1 \
-  https://github.com/ultralytics/ultralytics.git /opt/yolo26-classify
-
-export YOLO_CONFIG_DIR=/data/yolo-settings
-export TORCH_HOME=/data/torch-cache
-mkdir -p "$YOLO_CONFIG_DIR" /data/up-init
+python -m pip install --no-deps -e .
+export YOLO_AUTOINSTALL=false
 ```
 
-不需要 `pip install ultralytics`，启动时 `--source` 指定官方代码目录。插件检查源码和配置文件的 SHA256，再导入该版本。检测和分类分别启动新进程，也不会升级已经安装的 YOLO11。
-
-检测固定的是发布权重记录的官方实验分支，包含该配方需要的 MuSGD 参数；分类发布权重没有记录历史 commit，采用固定的公开 v8.4.0 代码和其 200 轮训练参数。
-
-## 2. 准备数据
-
-检测使用官方 COCO 数据 YAML，目录中包含 `images/train2017`、`images/val2017`、对应 `labels/` 和 `annotations/instances_val2017.json`。本配方的 CopyPaste 需要官方 **coco2017labels-segments** 多边形标签。可使用固定源码中的 `ultralytics/cfg/datasets/coco.yaml`，复制后把 `path` 改为本机数据根目录，保留 80 类名称及 `val2017.txt` 验证列表。
-
-分类使用 ImageFolder 目录：`imagenet/train/<类别>/图片`、`imagenet/val/<类别>/图片`，两边类别目录及排序相同。正式任务分别使用完整 COCO2017 和 ImageNet-1K。
-
-## 3. 创建公共初始化
-
-只生成一次，然后把 `.pt` 和同名 `.pt.json` 一起复制给两家。已存在的文件不会覆盖。
+配置会校验外部源码摘要。检测使用固定 Ultralytics 源码 revision `557e95b99c24c5b0d4eb5973d5d54a20a799566a`；分类使用公开 `v8.4.0`。检出到稳定目录后设置：
 
 ```bash
-curl -L --fail \
-  https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26s-objv1-150.pt \
-  -o /data/up-init/yolo26s-objv1-150.pt
+export YOLO26_DETECT_SOURCE=/opt/ultralytics-yolo26-detect
+git clone https://github.com/ultralytics/ultralytics.git "$YOLO26_DETECT_SOURCE"
+git -C "$YOLO26_DETECT_SOURCE" checkout --detach 557e95b99c24c5b0d4eb5973d5d54a20a799566a
 
-CUDA_VISIBLE_DEVICES="" python -m up yolo26 init \
-  --config configs/det/yolo26/yolo26s_coco70.yaml --source /opt/yolo26-detect \
-  --pretrained /data/up-init/yolo26s-objv1-150.pt \
-  --output /data/up-init/yolo26s-coco.pt
-
-CUDA_VISIBLE_DEVICES="" python -m up yolo26 init \
-  --config configs/cls/yolo26/yolo26s_imagenet200.yaml --source /opt/yolo26-classify \
-  --output /data/up-init/yolo26s-cls.pt
+export YOLO26_CLASSIFY_SOURCE=/opt/ultralytics-yolo26-classify
+git clone --branch v8.4.0 --depth 1 https://github.com/ultralytics/ultralytics.git "$YOLO26_CLASSIFY_SOURCE"
 ```
 
-检测会检查 Objects365 文件哈希，再按官方代码生成 80 类头。分类从 YAML 随机建模，不加载已经训练好的 ImageNet 分类权重。
+检测还需要设置：
 
-## 4. 训练、恢复与验证
+```bash
+export OBJECTS365_WEIGHTS=/data/weights/yolo26s-objv1-150.pt
+export COCO_YOLO_YAML=/data/coco.yaml
+```
 
-先进入对应厂商环境。下面的 `PLATFORM` 可选 `nvidia` 或 `metax_cuda`，`batch` 是全局 batch，已经写进 YAML。
+`COCO_YOLO_YAML` 按固定源码中的 COCO YAML 配置本地 `path`，并提供 `images/`、`labels/`、训练/验证列表和 `annotations/instances_val2017.json`。CopyPaste 需要 COCO2017 多边形标签。检测从官方 Objects365 初始化权重开始。
+
+分类设置 `IMAGENET_ROOT` 为 ImageFolder 根目录，包含 `train/<class>/` 和 `val/<class>/`。分类配方使用随机初始化；不得加载已经训练的 ImageNet 分类权重作为初始权重。
+
+## 训练与验证
+
+下面以四卡 NVIDIA 检测为例。沐曦在自己的 Torch 环境中将 `PLATFORM` 改为 `metax_cuda`；调整卡数时保持 YAML 中的全局 batch 不变。
 
 ```bash
 PLATFORM=nvidia
-CFG=configs/det/yolo26/yolo26s_coco70.yaml
-SOURCE=/opt/yolo26-detect
-DATA=/data/coco.yaml
-INIT=/data/up-init/yolo26s-coco.pt
-RUN=/data/up-runs/$PLATFORM/yolo26s-coco
+NG=4
+CFG=configs/benchmarks/reference_aligned/yolo26s_detect.yaml
+RUN=/path/to/afs/up/$PLATFORM/yolo26s-detect
+mkdir -p "$RUN"
 
-CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --standalone --nproc_per_node=4 \
-  tools/run_yolo26.py train --config "$CFG" --source "$SOURCE" \
-  --platform "$PLATFORM" --data "$DATA" --weights "$INIT" --output "$RUN"
-
-# 中断后恢复，继续原配置的完整训练预算。
-CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --standalone --nproc_per_node=4 \
-  tools/run_yolo26.py train --config "$CFG" --source "$SOURCE" \
-  --platform "$PLATFORM" --data "$DATA" \
-  --weights "$RUN/weights/last.pt" --output "$RUN" --resume
-
-# 新进程验证；last.pt 与 best.pt 分别执行，分别保存结果。
-CUDA_VISIBLE_DEVICES=0 python -m up yolo26 val \
-  --config "$CFG" --source "$SOURCE" --platform "$PLATFORM" \
-  --data "$DATA" --weights "$RUN/weights/last.pt" --output "$RUN/val-last"
+python -m up train --config "$CFG" --ng "$NG" --launch pytorch \
+  --opts runtime.platform "$PLATFORM" \
+    saver.save_dir "$RUN/checkpoints" saver.results_dir "$RUN/results"
 ```
 
-分类复用这些命令，替换以下五个变量：
+分类使用同一入口和自己的新输出目录：
 
 ```bash
-CFG=configs/cls/yolo26/yolo26s_imagenet200.yaml
-SOURCE=/opt/yolo26-classify
-DATA=/data/imagenet
-INIT=/data/up-init/yolo26s-cls.pt
-RUN=/data/up-runs/$PLATFORM/yolo26s-cls
+CFG=configs/benchmarks/reference_aligned/yolo26s_classify.yaml
+RUN=/path/to/afs/up/$PLATFORM/yolo26s-classify
+mkdir -p "$RUN"
+
+python -m up train --config "$CFG" --ng "$NG" --launch pytorch \
+  --opts runtime.platform "$PLATFORM" \
+    saver.save_dir "$RUN/checkpoints" saver.results_dir "$RUN/results"
 ```
 
-训练中的验证继续使用 training 运行时；独立 `val` 和 `predict` 使用 inference 运行时。训练日志、逐轮指标和 `weights/last.pt`、`weights/best.pt` 由官方 Trainer 保存；恢复也由官方流程处理。
-
-## 5. 图片预测与 ONNX
-
-两类模型使用同一个命令，分别加载自己的配置、源码和权重：
+选择训练生成的最佳 checkpoint，另起进程评估：
 
 ```bash
-CUDA_VISIBLE_DEVICES=0 python -m up yolo26 predict \
-  --config "$CFG" --source "$SOURCE" --platform "$PLATFORM" \
-  --weights "$RUN/weights/best.pt" --images /data/example.jpg \
-  --output "$RUN/predictions"
-
-CUDA_VISIBLE_DEVICES=0 python -m up yolo26 export \
-  --config "$CFG" --source "$SOURCE" --platform "$PLATFORM" \
-  --weights "$RUN/weights/best.pt"
+BEST="$RUN/checkpoints/ckpt_best.pth"
+python -m up train --evaluate --config "$CFG" --ng "$NG" --launch pytorch \
+  --opts runtime.platform "$PLATFORM" saver.auto_resume false \
+    saver.resume_model "$BEST" \
+    saver.save_dir "$RUN/eval-best/checkpoints" \
+    saver.results_dir "$RUN/eval-best/results"
 ```
 
-导出前安装 `requirements/export.txt`。ONNX 写在权重旁边，固定 batch 1、FP32、opset 17；检测保留官方端到端输出，分类输出 1000 类概率。
+独立图片推理使用 UP inference 入口：
 
-## 对应代码
+```bash
+python -m up inference --config "$CFG" --ng 1 \
+  --ckpt "$BEST" --img_path /data/example.jpg \
+  --vis_dir "$RUN/predictions" \
+  --opts runtime.platform "$PLATFORM"
+```
 
-| 文件 | 作用 |
-|---|---|
-| [commands/yolo26.py](../../up/commands/yolo26.py) | `up yolo26` 参数和五种运行模式 |
-| [tasks/yolo26/plugin.py](../../up/tasks/yolo26/plugin.py) | 官方模型初始化、训练、验证、预测、导出；绑定 UP 运行时 |
-| [tasks/yolo26/source.py](../../up/tasks/yolo26/source.py) | 固定官方源码，阻止混用检测、分类或 YOLO11 的版本 |
-| [run_yolo26.py](../../tools/run_yolo26.py) | 同一入口的脚本形式，供 torchrun 使用 |
-
-源码、权重及其许可见 [Ultralytics](https://github.com/ultralytics/ultralytics)；官方检测配方说明见 [YOLO26 training recipe](https://docs.ultralytics.com/guides/yolo26-training-recipe/)。
+归档时将实际 YAML、代码 commit、源码 revision、初始化权重 SHA256、运行日志、评估结果、最佳 checkpoint 和 SHA256 一并放入 AFS/AOSS 的 `up/` 目录。旧的 `python -m up yolo26` 子命令仍保留作兼容入口；新实验不要用旧包装器任务配置或旧 runner。

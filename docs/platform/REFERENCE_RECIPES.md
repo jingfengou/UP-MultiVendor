@@ -3,12 +3,12 @@
 For the five tasks in the vendor handoff, use the configuration and input
 table in [Four-model training and evaluation](FOUR_MODEL_RUNBOOK.md).
 
-The maintained reference-aligned recipes use UP's existing `BaseRunner`. UP
-owns batch iteration, backward, optimizer updates, validation iteration,
-checkpointing and image inference. The YOLO26 and DETR plugins reuse the fixed
-official network, loss, augmentation and metric components, not their training
-loops. YOLOX-S has one maintained Megvii-aligned recipe in
-`configs/benchmarks/three_vendor/`.
+Each benchmark task has one maintained, full training YAML. The recipes using
+UP's existing `BaseRunner` keep batch iteration, backward, optimizer updates,
+validation, checkpointing and image inference in UP. The YOLO26 and DETR plugins
+reuse fixed reference network, loss, augmentation and metric components, not
+their training loops. YOLOX-S has one maintained Megvii-aligned recipe; the
+shared `_components` YAMLs are include-only fragments, not alternate recipes.
 
 ## Plugin layout
 
@@ -49,15 +49,17 @@ The recipes below select the registered UP plugins through the common commands.
 | --- | --- | --- | --- | --- | --- |
 | [`reference_aligned/resnet50_fair_native.yaml`](../../configs/benchmarks/reference_aligned/resnet50_fair_native.yaml) | FAIR recipe with UP ResNet50 | ImageNet-1K | 90 | 64 / 256 | FP32 |
 | [`three_vendor/yolox_s_megvii_aligned.yaml`](../../configs/benchmarks/three_vendor/yolox_s_megvii_aligned.yaml) | Megvii-aligned recipe with UP YOLOX-S | COCO2017 | 300 | 16 / 64 | AMP |
-| `yolo26s_detect.yaml` | Fixed YOLO26 detection source and released Objects365 initialization | COCO2017 | 70 | 32 / 128 | Official AMP |
-| `yolo26s_classify.yaml` | Public Ultralytics `v8.4.0` classification source | ImageNet-1K | 200 | 64 / 256 | Official AMP |
-| `detr_r50.yaml` | Official `29901c51`, 150-epoch recipe | COCO2017 | 150 | 8 / 32 | FP32 |
+| [`reference_aligned/yolo26s_detect.yaml`](../../configs/benchmarks/reference_aligned/yolo26s_detect.yaml) | Fixed YOLO26 detection source and released Objects365 initialization | COCO2017 | 70 | 32 / 128 | Official AMP |
+| [`reference_aligned/yolo26s_classify.yaml`](../../configs/benchmarks/reference_aligned/yolo26s_classify.yaml) | Public Ultralytics `v8.4.0` classification source | ImageNet-1K | 200 | 64 / 256 | Official AMP |
+| [`reference_aligned/detr_r50.yaml`](../../configs/benchmarks/reference_aligned/detr_r50.yaml) | Official `29901c51`, 150-epoch recipe | COCO2017 | 150 | 8 / 32 | FP32 |
+| [`three_vendor/yolo11s.yaml`](../../configs/benchmarks/three_vendor/yolo11s.yaml) | Ultralytics YOLO11s reference recipe | COCO2017 | 600 | 32 / 128 | AMP |
 
 The FAIR and Megvii YAMLs select the reference training settings and registered
 UP components. The shared YOLOX model fragment lives under
 [`_components/`](../../configs/benchmarks/_components/); it is an include-only
-file, not a training recipe. YOLOX has one maintained Megvii-aligned recipe.
-DETR uses global batch 32 and validation batch two per GPU.
+file, not a training recipe. DETR uses global batch 32 and validation batch two
+per GPU. General model YAMLs outside `configs/benchmarks/` are smoke-test or
+adapter examples, not additional benchmark recipes.
 [Original DETR batch-size confirmation](https://github.com/facebookresearch/detr/issues/61#issuecomment-640496198)
 
 YOLO26's published device field does not establish the original physical GPU

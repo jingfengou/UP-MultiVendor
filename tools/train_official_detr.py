@@ -1,8 +1,8 @@
-"""Run pinned official DETR with the selected NVIDIA or MetaX Torch environment.
+"""Run a pinned author-source DETR reproduction with an explicit CLI config.
 
 The official checkout owns the model, augmentation, loss, optimizer loop and
-COCO evaluator. UP selects the device runtime; it does not substitute its older
-DETR adapter or relabel COCO categories for this benchmark.
+COCO evaluator. This compatibility helper is separate from the maintained
+BaseRunner benchmark recipe in configs/benchmarks/reference_aligned/detr_r50.yaml.
 """
 import argparse
 import hashlib
@@ -83,8 +83,8 @@ def prepare_initialization(official, args, output, config):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source', type=Path, required=True)
-    parser.add_argument('--config', type=Path, default=REPOSITORY /
-                        'configs/benchmarks/three_vendor/detr_r50_official.yaml')
+    parser.add_argument('--config', type=Path, required=True,
+                        help='Explicit official DETR CLI-style config YAML')
     parser.add_argument('--platform', choices=['nvidia', 'metax_cuda'], required=True)
     parser.add_argument('--coco-path', type=Path)
     parser.add_argument('--output-dir', type=Path)

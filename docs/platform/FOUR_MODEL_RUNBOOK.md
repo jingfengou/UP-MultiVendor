@@ -37,6 +37,8 @@ export YOLO_AUTOINSTALL=false
 
 启用 `runtime.audit_recipe` 的配方会在检查点目录记录各 rank 的实际种子和 AMP 状态。ResNet50 和 YOLOX-S 使用 UP 自带网络，分别按 FAIR 与 Megvii 配方设置训练和评测。YOLOX-S 只维护一份 Megvii 对齐配方；`random_seed: null` 表示不主动设置种子，对应作者源码默认行为。YOLO26s 和 DETR 通过注册组件在 UP `BaseRunner` 里使用固定版本的外部模型、数据与指标。分类 YOLO26s 使用公开 `v8.4.0` 的 MuSGD。配方细节见 [Reference Recipes](REFERENCE_RECIPES.md)。
 
+表中每项任务对应唯一的正式 benchmark YAML。`configs/benchmarks/_components/` 只存放被主配方 include 的片段；`configs/cls/`、`configs/det/` 的通用示例不应用来替代表中的正式训练配置。
+
 - ResNet50 的 `UP_IMAGENET_ROOT` 下有 `train/`、`val/` 和 `meta/{train,val}.txt`。每行是相对各自图片根目录的路径及整数类别，例如 `n01440764/example.JPEG 0`。交接时使用同一份类别映射和清单。
 - YOLOX-S 的工作目录下需要 `coco/train2017/`、`coco/val2017/` 和 `coco/annotations/instances_{train,val}2017.json`；建议将 `coco/` 链接到数据集。DETR 的 `COCO_ROOT` 下使用相同目录结构。DETR 还需要 TorchVision 的 ImageNet 预训练 ResNet50 V1 骨干。离线时提前放入 `TORCH_HOME` 对应缓存目录。
 - YOLO26s 检测的 `COCO_YOLO_YAML` 指向本地 COCO YAML，按固定源码的 `ultralytics/cfg/datasets/coco.yaml` 复制并修改 `path`。需要 `images/`、`labels/`、`train2017.txt`、`val2017.txt` 及 `annotations/instances_val2017.json`，训练使用官方多边形标签。`OBJECTS365_WEIGHTS` 指向初始化文件 [yolo26s-objv1-150.pt](https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26s-objv1-150.pt)。

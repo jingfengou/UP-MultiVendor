@@ -9,15 +9,16 @@ git clone https://github.com/jingfengou/UP-MultiVendor.git
 cd UP-MultiVendor
 ```
 
-| 模型 | 配置 |
+| 正式对比任务 | 当前唯一维护的 benchmark 配方 |
 |---|---|
-| ResNet50 | [res50.yaml](configs/cls/resnet/res50.yaml) |
-| YOLO11s | [yolo11s.yaml](configs/det/yolo11/yolo11s.yaml) |
-| YOLO26s（COCO 检测） | [yolo26s_coco70.yaml](configs/det/yolo26/yolo26s_coco70.yaml) |
-| YOLO26s-cls（ImageNet 分类） | [yolo26s_imagenet200.yaml](configs/cls/yolo26/yolo26s_imagenet200.yaml) |
-| YOLOX-S（原版 UP） | [yolox_small.yaml](configs/det/yolox/yolox_small.yaml) |
-| ViT-B/16 | [vit_b16_224.yaml](configs/cls/vision_transformer/vit_b16_224.yaml) |
-| DETR-R50 | [detr_r50.yaml](configs/det/detr/detr_r50.yaml) |
+| ResNet50 · FAIR | [resnet50_fair_native.yaml](configs/benchmarks/reference_aligned/resnet50_fair_native.yaml) |
+| YOLOX-S · Megvii 配方对齐、UP BaseRunner | [yolox_s_megvii_aligned.yaml](configs/benchmarks/three_vendor/yolox_s_megvii_aligned.yaml) |
+| YOLO26s · COCO 检测 | [yolo26s_detect.yaml](configs/benchmarks/reference_aligned/yolo26s_detect.yaml) |
+| YOLO26s · ImageNet 分类 | [yolo26s_classify.yaml](configs/benchmarks/reference_aligned/yolo26s_classify.yaml) |
+| DETR-R50 | [detr_r50.yaml](configs/benchmarks/reference_aligned/detr_r50.yaml) |
+| YOLO11s | [yolo11s.yaml](configs/benchmarks/three_vendor/yolo11s.yaml) |
+
+以上是各正式 benchmark 任务的唯一完整训练配置。`configs/benchmarks/_components/` 中的 YAML 是被主配方 include 的组件片段，不是独立训练配置。`configs/cls/`、`configs/det/` 下仍保留通用模型和平台 smoke-test 示例；它们不代表当前精度对比配方。尤其是 `configs/det/yolox/yolox_small.yaml` 是通用原版 UP 示例，正式 YOLOX-S 对比应使用表中的 Megvii 对齐配方。
 
 ## 架构
 
@@ -27,7 +28,7 @@ UP 模型 → 标准 Torch 操作 → 厂商 Torch / 计算库
         → UP 专用操作 → NativeOps → 厂商实现
 ```
 
-ResNet/ViT 的模型计算保持原版。YOLO11s 使用官方 Ultralytics 结构和损失，DETR 使用随仓库保留的官方源码。普通 ReLU、卷积和矩阵乘法直接用 Torch，不逐层套包装。原版 43 个 C++/CUDA 文件保留：NVIDIA 用 CUDA 编译，沐曦用 MACA cuBridge 编译为各自的扩展。
+ResNet/ViT 的模型计算保持原版。YOLO11s 使用官方 Ultralytics 结构和损失；YOLO26、DETR 通过注册组件接入固定版本的参考实现，由 UP `BaseRunner` 训练。普通 ReLU、卷积和矩阵乘法直接用 Torch，不逐层套包装。原版 43 个 C++/CUDA 文件保留：NVIDIA 用 CUDA 编译，沐曦用 MACA cuBridge 编译为各自的扩展。
 
 ## 安装与选择厂商
 
@@ -36,6 +37,7 @@ Python 3.10 及以上。每家使用独立环境，先安装该厂商提供的 T
 ```bash
 python -m pip install -r requirements.txt
 python -m pip install --no-deps -r requirements/yolo11.txt
+python -m pip install --no-deps -r requirements/yolo26.txt
 python -m pip install -r requirements/export.txt
 python -m pip install --no-deps -e .
 ```
@@ -64,7 +66,7 @@ runtime:
 
 ## 训练、验证、推理、导出
 
-先在对应 YAML 中设置数据路径。下面以 ResNet50 为例；UP Runner 模型替换配置路径即可。启动器默认单卡，多卡使用 `--ng 2`。YOLO26 使用 `python -m up yolo26`，完整命令见 [YOLO26 使用指南](docs/platform/YOLO26.md)。
+先在对应 YAML 中设置数据路径。下面的 ResNet 配置是通用 smoke-test 示例；正式对比请使用上表中唯一的 benchmark 配方。启动器默认单卡，多卡使用 `--ng 2`。正式 YOLO26 训练也走 UP `BaseRunner`，配置和命令见 [YOLO26 使用指南](docs/platform/YOLO26.md)。
 
 ```bash
 # 训练；可在命令末尾覆盖厂商
@@ -90,7 +92,7 @@ python -m up to_onnx --config configs/cls/resnet/res50.yaml \
 
 ## 训练配置
 
-YOLOX-S、YOLO11s 和官方长程 DETR 配置位于 [`configs/benchmarks/three_vendor/`](configs/benchmarks/three_vendor/)。ResNet50 的 FAIR 对齐配方位于 [`configs/benchmarks/reference_aligned/`](configs/benchmarks/reference_aligned/)。运行方法见 [训练指南](docs/platform/TRAINING.md)。另提供 **YOLO26s：COCO 70 轮、4 × 32** 和 **YOLO26s-cls：ImageNet 200 轮、4 × 64** 两套配方。两项均有独立 YAML 和共用模型插件，保留各自官方训练、验证、预测与导出流程；安装和启动见 [YOLO26 使用指南](docs/platform/YOLO26.md)。
+benchmark 配方均由 UP 的统一训练、验证和推理入口执行；模型差异通过 YAML 选择已注册的网络、数据、增强、损失、优化器和评估组件。YOLOX-S 当前配方使用 UP 原生网络与 BaseRunner，按 Megvii 数据增强和配置对齐，不是“原版 UP 配方”，也不是 Megvii 原训练器。各任务的全局 batch、精度、随机种子和数据要求见 [训练指南](docs/platform/TRAINING.md) 与 [Reference Recipes](docs/platform/REFERENCE_RECIPES.md)。
 
 ## 厂商扩展
 
