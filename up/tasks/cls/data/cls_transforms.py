@@ -78,6 +78,21 @@ class PILColorJitter(TorchAugmentation):
         self.op = transforms.ColorJitter(brightness, contrast, saturation, hue)
 
 
+@AUGMENTATION_REGISTRY.register('imagenet_pca_lighting')
+class ImageNetPCALighting(TorchAugmentation):
+    def __init__(self, std=0.1):
+        self.std = std
+        self.op = self.lighting
+
+    def lighting(self, image):
+        eigvec = image.new_tensor([[-0.5675, 0.7192, 0.4009],
+                                   [-0.5808, -0.0045, -0.8140],
+                                   [-0.5836, -0.6948, 0.4203]])
+        eigval = image.new_tensor([0.2175, 0.0188, 0.0045])
+        alpha = image.new_empty(3).normal_(std=self.std)
+        return image + (eigvec @ (eigval * alpha)).view(3, 1, 1)
+
+
 @AUGMENTATION_REGISTRY.register('torch_resize')
 class TorchResize(TorchAugmentation):
     def __init__(self, size, **kwargs):

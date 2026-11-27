@@ -1,6 +1,10 @@
 # YOLO26 训练与使用
 
-两个任务共用 `up/tasks/yolo26/` 插件，网络、增强、损失、优化器、EMA 和验证流程使用各自固定版本的官方代码。UP 负责选择 NVIDIA / 沐曦运行时，沐曦专用操作使用 MACA/cuBridge 原生扩展。
+**新训练使用 [统一 UP 训练配方](REFERENCE_RECIPES.md)。** 新插件位于 `up/tasks/det/plugins/yolo26/`，由 UP `BaseRunner` 管理训练、验证和检查点，图片推理使用 `BaseInference`。模型特有的规则分别放在 `models/`、`data/` 和 `utils/`。
+
+## 旧入口兼容用法
+
+以下命令供已有任务继续使用。检测和分类共用 `up/tasks/yolo26/` 旧入口，调用各自固定版本的官方训练器。它与新的 `reference_aligned/` 配方采用不同的种子和训练设置，请分别使用对应配置与检查点。
 
 | 任务 | 配置 | 初始化 | 轮数 / 尺寸 | 四卡训练 batch |
 |---|---|---|---|---|

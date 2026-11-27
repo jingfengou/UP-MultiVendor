@@ -89,18 +89,18 @@ class PetrelHelper(object):
             js = json.loads(PetrelHelper._petrel_helper.load_data(path, ceph_read=False))
         return js
 
-    def load_pretrain(self, path, map_location=None):
+    def load_pretrain(self, path, map_location=None, **kwargs):
         if 's3://' not in path:
             assert os.path.exists(path), f'No such file: {path}'
-            return torch.load(path, map_location=map_location)
+            return torch.load(path, map_location=map_location, **kwargs)
         elif 'http://' in path:
-            return torch.hub.load_state_dict_from_url(path, map_location=map_location)
+            return torch.hub.load_state_dict_from_url(path, map_location=map_location, **kwargs)
         else:
             self.check_init()
 
             file_bytes = self.client.get(path)
             buffer = io.BytesIO(file_bytes)
-            res = torch.load(buffer, map_location=map_location)
+            res = torch.load(buffer, map_location=map_location, **kwargs)
             return res
 
     @staticmethod

@@ -4,6 +4,8 @@
 
 寒武纪和昇腾的开发入口与平台验收项见 [寒武纪 MLU](../../up/platform/cambricon_mlu/) 和 [昇腾 NPU](../../up/platform/ascend_npu/)。两家目录按 `runtime.py`、`native_ops.py`、`nms.py` 分工。
 
+四模型正式任务使用 [训练与评测交接指南](FOUR_MODEL_RUNBOOK.md) 中的五份配置和启动命令。
+
 ## 厂商接入
 
 ### 1. 准备环境

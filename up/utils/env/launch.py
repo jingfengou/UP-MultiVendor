@@ -4,6 +4,7 @@
 # Copyright (c) Facebook, Inc. and its affiliates.
 
 from datetime import timedelta
+import os
 from ..general.log_helper import default_logger as logger
 
 import torch.distributed as dist
@@ -85,12 +86,15 @@ def _distributed_worker(
     args,
     timeout=DEFAULT_TIMEOUT,
 ):
+    global_rank = machine_rank * num_gpus_per_machine + local_rank
+    # Publish process identity before optional official components read it.
+    os.environ.update(RANK=str(global_rank), LOCAL_RANK=str(local_rank),
+                      WORLD_SIZE=str(world_size), LOCAL_WORLD_SIZE=str(num_gpus_per_machine))
     runtime = setup_runtime({'runtime': {'platform': getattr(args, 'platform', 'nvidia')}},
                             purpose=getattr(args, 'purpose', 'training'))
     # 每个子进程先绑定 local_rank，再初始化通信组，避免各 rank 默认占用第 0 张卡。
     assert num_gpus_per_machine <= runtime.module.device_count()
     runtime.set_device(local_rank)
-    global_rank = machine_rank * num_gpus_per_machine + local_rank
     logger.info("Rank {} initialization finished.".format(global_rank))
     try:
         dist.init_process_group(
