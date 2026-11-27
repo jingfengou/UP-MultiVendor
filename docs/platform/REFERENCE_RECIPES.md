@@ -3,11 +3,12 @@
 For the five tasks in the vendor handoff, use the configuration and input
 table in [Four-model training and evaluation](FOUR_MODEL_RUNBOOK.md).
 
-All recipes in `configs/benchmarks/reference_aligned/` use UP's existing
-`BaseRunner`. UP owns batch iteration, backward, optimizer updates, validation
-iteration, checkpointing and image inference. The YOLO26 and DETR plugins reuse
-the fixed official network, loss, augmentation and metric components, not their
-training loops.
+The maintained reference-aligned recipes use UP's existing `BaseRunner`. UP
+owns batch iteration, backward, optimizer updates, validation iteration,
+checkpointing and image inference. The YOLO26 and DETR plugins reuse the fixed
+official network, loss, augmentation and metric components, not their training
+loops. YOLOX-S has one maintained Megvii-aligned recipe in
+`configs/benchmarks/three_vendor/`.
 
 ## Plugin layout
 
@@ -46,16 +47,17 @@ The recipes below select the registered UP plugins through the common commands.
 
 | Configuration | Reference | Dataset | Epochs | Four GPUs: batch per GPU / total | Precision |
 | --- | --- | --- | --- | --- | --- |
-| `resnet50_fair_native.yaml` | FAIR recipe with UP ResNet50 | ImageNet-1K | 90 | 64 / 256 | FP32 |
-| `yolox_s_megvii_native.yaml` | Megvii recipe with UP YOLOX-S | COCO2017 | 300 | 16 / 64 | AMP |
+| [`reference_aligned/resnet50_fair_native.yaml`](../../configs/benchmarks/reference_aligned/resnet50_fair_native.yaml) | FAIR recipe with UP ResNet50 | ImageNet-1K | 90 | 64 / 256 | FP32 |
+| [`three_vendor/yolox_s_megvii_aligned.yaml`](../../configs/benchmarks/three_vendor/yolox_s_megvii_aligned.yaml) | Megvii-aligned recipe with UP YOLOX-S | COCO2017 | 300 | 16 / 64 | AMP |
 | `yolo26s_detect.yaml` | Fixed YOLO26 detection source and released Objects365 initialization | COCO2017 | 70 | 32 / 128 | Official AMP |
 | `yolo26s_classify.yaml` | Public Ultralytics `v8.4.0` classification source | ImageNet-1K | 200 | 64 / 256 | Official AMP |
 | `detr_r50.yaml` | Official `29901c51`, 150-epoch recipe | COCO2017 | 150 | 8 / 32 | FP32 |
 
-`resnet50.yaml` and `yolox_s.yaml` retain the original UP baselines at global
-batches 1024 and 32 respectively. The FAIR and Megvii YAMLs include their UP
-network definitions and select the reference training settings and registered
-recipe components. DETR uses global batch 32 and validation batch two per GPU.
+The FAIR and Megvii YAMLs select the reference training settings and registered
+UP components. The shared YOLOX model fragment lives under
+[`_components/`](../../configs/benchmarks/_components/); it is an include-only
+file, not a training recipe. YOLOX has one maintained Megvii-aligned recipe.
+DETR uses global batch 32 and validation batch two per GPU.
 [Original DETR batch-size confirmation](https://github.com/facebookresearch/detr/issues/61#issuecomment-640496198)
 
 YOLO26's published device field does not establish the original physical GPU
@@ -75,11 +77,13 @@ state are unavailable.
 
 ## What stays with each reference
 
-- The original UP ResNet50 and YOLOX baselines use UP's `set_random_seed`, initialization order,
-  FP32, optimizer, learning-rate schedule and validation frequency. YOLOX retains
-  its original BN averaging before scheduled validation.
-- The FAIR and Megvii recipes use seed `0` and select their own training
-  augmentations, learning-rate settings and validation schedules.
+- The original UP ResNet50 baseline uses UP's `set_random_seed`, initialization
+  order, FP32, optimizer, learning-rate schedule and validation frequency.
+- FAIR ResNet50 uses seed `0`. The Megvii-aligned YOLOX-S recipe leaves
+  `random_seed: null`, uses Megvii's data augmentation and no-residual CSP neck,
+  uses the 448–832 multi-scale range, and switches to no-aug at epoch 285.
+  Its sample order still comes from UP's registered distributed sampler rather
+  than Megvii's infinite sampler.
 - YOLO26 uses its fixed official seed initialization, AMP check, optimizer
   grouping, batch warmup, accumulation, EMA and epoch-state updates. These are
   registered UP components, not an embedded official Trainer.

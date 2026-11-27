@@ -7,7 +7,7 @@
 在各自厂商的 Linux 容器中使用匹配的 PyTorch、TorchVision 和 SDK。寒武纪使用 `torch_mlu`、CNNL/CNCL，昇腾使用 `torch_npu`、CANN/HCCL。
 
 ```bash
-git clone --branch codex/vendor-four-models-20261125 https://github.com/jingfengou/UP-MultiVendor.git
+git clone --branch main https://github.com/jingfengou/UP-MultiVendor.git
 cd UP-MultiVendor
 python -m pip install -r requirements.txt
 UP_BUILD_PLATFORM=none python -m pip install --no-deps -e .
@@ -27,18 +27,18 @@ export YOLO_AUTOINSTALL=false
 
 ## 2. 选择任务并准备数据
 
-| 任务与指标 | 训练、验证共用 YAML | 轮数 | 4 卡每卡 / 全局 batch | 训练精度 / seed | 启动前设置的环境变量 |
+| 任务与指标 | 训练、验证共用 YAML | 轮数 | 4 卡每卡 / 全局 batch | 训练精度 / seed | 启动前准备 |
 | --- | --- | ---: | ---: | --- | --- |
 | ResNet50 · ImageNet-1K Top-1，单中心裁剪 | [resnet50_fair_native.yaml](../../configs/benchmarks/reference_aligned/resnet50_fair_native.yaml) | 90 | 64 / 256 | FP32 / 0 | `UP_IMAGENET_ROOT`、`UP_FAIR_OUTPUT_ROOT` |
-| YOLOX-S · COCO AP50:95 | [yolox_s_megvii_native.yaml](../../configs/benchmarks/reference_aligned/yolox_s_megvii_native.yaml) | 300 | 16 / 64 | AMP / 0 | `UP_COCO_ROOT`、`UP_MEGVII_YOLOX_OUTPUT_ROOT` |
+| YOLOX-S · COCO AP50:95 | [yolox_s_megvii_aligned.yaml](../../configs/benchmarks/three_vendor/yolox_s_megvii_aligned.yaml) | 300 | 16 / 64 | AMP / 未显式设 seed | 工作目录含 `coco/`，输出写入 `outputs/` |
 | YOLO26s 检测 · COCO 端到端 AP50:95 | [yolo26s_detect.yaml](../../configs/benchmarks/reference_aligned/yolo26s_detect.yaml) | 70 | 32 / 128 | AMP / 0 | `YOLO26_DETECT_SOURCE`、`OBJECTS365_WEIGHTS`、`COCO_YOLO_YAML` |
 | YOLO26s 分类 · ImageNet-1K Top-1 | [yolo26s_classify.yaml](../../configs/benchmarks/reference_aligned/yolo26s_classify.yaml) | 200 | 64 / 256 | AMP / 0 | `YOLO26_CLASSIFY_SOURCE`、`IMAGENET_ROOT` |
 | DETR R50 · COCO AP50:95 | [detr_r50.yaml](../../configs/benchmarks/reference_aligned/detr_r50.yaml) | 150 | 8 / 32 | FP32 / 42 | `DETR_SOURCE`、`COCO_ROOT` |
 
-表中 seed 为 YAML 基础值。实际各 rank 的种子和 AMP 状态见 `checkpoints/recipe-rank*.json`。ResNet50 和 YOLOX-S 使用 UP 自带网络，按 FAIR 和 Megvii 配方设置训练与评测。YOLO26s 和 DETR 通过注册组件在 UP `BaseRunner` 里使用固定版本的外部模型、数据与指标。分类 YOLO26s 使用公开 `v8.4.0` 的 MuSGD。配方细节见 [Reference Recipes](REFERENCE_RECIPES.md)。
+启用 `runtime.audit_recipe` 的配方会在检查点目录记录各 rank 的实际种子和 AMP 状态。ResNet50 和 YOLOX-S 使用 UP 自带网络，分别按 FAIR 与 Megvii 配方设置训练和评测。YOLOX-S 只维护一份 Megvii 对齐配方；`random_seed: null` 表示不主动设置种子，对应作者源码默认行为。YOLO26s 和 DETR 通过注册组件在 UP `BaseRunner` 里使用固定版本的外部模型、数据与指标。分类 YOLO26s 使用公开 `v8.4.0` 的 MuSGD。配方细节见 [Reference Recipes](REFERENCE_RECIPES.md)。
 
 - ResNet50 的 `UP_IMAGENET_ROOT` 下有 `train/`、`val/` 和 `meta/{train,val}.txt`。每行是相对各自图片根目录的路径及整数类别，例如 `n01440764/example.JPEG 0`。交接时使用同一份类别映射和清单。
-- YOLOX-S 的 `UP_COCO_ROOT` 和 DETR 的 `COCO_ROOT` 下都要有 `train2017/`、`val2017/` 和 `annotations/instances_{train,val}2017.json`。DETR 还需要 TorchVision 的 ImageNet 预训练 ResNet50 V1 骨干。离线时提前放入 `TORCH_HOME` 对应缓存目录。
+- YOLOX-S 的工作目录下需要 `coco/train2017/`、`coco/val2017/` 和 `coco/annotations/instances_{train,val}2017.json`；建议将 `coco/` 链接到数据集。DETR 的 `COCO_ROOT` 下使用相同目录结构。DETR 还需要 TorchVision 的 ImageNet 预训练 ResNet50 V1 骨干。离线时提前放入 `TORCH_HOME` 对应缓存目录。
 - YOLO26s 检测的 `COCO_YOLO_YAML` 指向本地 COCO YAML，按固定源码的 `ultralytics/cfg/datasets/coco.yaml` 复制并修改 `path`。需要 `images/`、`labels/`、`train2017.txt`、`val2017.txt` 及 `annotations/instances_val2017.json`，训练使用官方多边形标签。`OBJECTS365_WEIGHTS` 指向初始化文件 [yolo26s-objv1-150.pt](https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26s-objv1-150.pt)。
 - YOLO26s 分类的 `IMAGENET_ROOT` 使用 `train/<类别>/`、`val/<类别>/` 的 ImageFolder 结构。
 
@@ -71,7 +71,7 @@ git -C "$DETR_SOURCE" checkout --detach 29901c51d7fe8712168b8d0d64351170bc0f83e0
 
 ## 4. 训练并复测最佳 checkpoint
 
-下面以 ResNet50 举例。在已验收的目标平台执行。跑其他任务时替换 `CFG` 和 `RUN`，设置表中的环境变量。`UP_FAIR_OUTPUT_ROOT` 和 `UP_MEGVII_YOLOX_OUTPUT_ROOT` 绑定本次 `RUN`。
+下面以 ResNet50 举例。在已验收的目标平台执行。跑其他任务时替换 `CFG` 和 `RUN`，并按任务准备表中的数据路径和源码绑定。
 
 ```bash
 set -o pipefail
@@ -93,18 +93,46 @@ bash scripts/train.sh "$NG" "$CFG" \
   2>&1 | tee "$RUN/train.log"
 ```
 
-训练结束后从验证选出的 `ckpt_best.pth` 另起进程跑完整验证集，使用同一份配置、源码和数据路径。
+YOLOX-S 的 YAML 将检查点和结果写到当前目录下的 `outputs/`，因此从 AFS 上的独立运行目录启动，并在该目录创建 `coco/` 数据链接：
+
+```bash
+RUN=/path/to/owned-afs/up/$PLATFORM/yolox-s-megvii
+mkdir -p "$RUN"
+ln -s /data/coco "$RUN/coco"
+cd "$RUN"
+python -m up train \
+  --config /path/to/UP-MultiVendor/configs/benchmarks/three_vendor/yolox_s_megvii_aligned.yaml \
+  --ng 4 --launch pytorch --opts runtime.platform "$PLATFORM"
+```
+
+ResNet50 训练结束后，从验证选出的 `ckpt_best.pth` 另起进程跑完整验证集，使用同一份配置、源码和数据路径：
 
 ```bash
 BEST="$RUN/checkpoints/ckpt_best.pth"
 EVAL="$RUN/eval-best"
 mkdir -p "$EVAL"
-UP_FAIR_OUTPUT_ROOT="$EVAL" UP_MEGVII_YOLOX_OUTPUT_ROOT="$EVAL" \
+UP_FAIR_OUTPUT_ROOT="$EVAL" \
   bash scripts/evaluate.sh "$NG" "$CFG" \
     --opts runtime.platform "$PLATFORM" saver.auto_resume false \
       saver.resume_model "$BEST" saver.save_dir "$EVAL/checkpoints" \
       saver.results_dir "$EVAL/results" \
   2>&1 | tee "$EVAL/eval.log"
+```
+
+YOLOX-S 的评测也从该任务的 AFS 工作目录启动，确保 `coco/` 链接仍在，并将输出重定向到新目录：
+
+```bash
+RUN=/path/to/owned-afs/up/$PLATFORM/yolox-s-megvii
+cd "$RUN"
+BEST="$RUN/outputs/checkpoints/ckpt_best.pth"
+EVAL="$RUN/eval-best"
+mkdir -p "$EVAL"
+python -m up train --evaluate \
+  --config /path/to/UP-MultiVendor/configs/benchmarks/three_vendor/yolox_s_megvii_aligned.yaml \
+  --ng 4 --launch pytorch \
+  --opts runtime.platform "$PLATFORM" saver.auto_resume false \
+    saver.resume_model "$BEST" saver.save_dir "$EVAL/checkpoints" \
+    saver.results_dir "$EVAL/results"
 ```
 
 训练使用自己的可写 AFS 新目录。Saver 会更新目录中的最佳 checkpoint 和最新 checkpoint 链接。完成后把实际运行配置 `running_config.json`、代码 commit 和适配 diff、设备/SDK/Torch 版本、每卡和全局 batch、训练及评测日志、最佳 checkpoint 和 SHA256 一起归档到自己的 AFS 或 AOSS `up/` 目录。分类报 Top-1，检测报 AP50:95，记录实际加载的 checkpoint。

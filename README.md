@@ -90,7 +90,7 @@ python -m up to_onnx --config configs/cls/resnet/res50.yaml \
 
 ## 训练配置
 
-ResNet50、YOLOX、YOLO11 和官方 DETR 配置位于 [`configs/benchmarks/three_vendor/`](configs/benchmarks/three_vendor/)，运行方法见 [训练指南](docs/platform/TRAINING.md)。另提供 **YOLO26s：COCO 70 轮、4 × 32** 和 **YOLO26s-cls：ImageNet 200 轮、4 × 64** 两套配方。两项均有独立 YAML 和共用模型插件，保留各自官方训练、验证、预测与导出流程；安装和启动见 [YOLO26 使用指南](docs/platform/YOLO26.md)。
+YOLOX-S、YOLO11s 和官方长程 DETR 配置位于 [`configs/benchmarks/three_vendor/`](configs/benchmarks/three_vendor/)。ResNet50 的 FAIR 对齐配方位于 [`configs/benchmarks/reference_aligned/`](configs/benchmarks/reference_aligned/)。运行方法见 [训练指南](docs/platform/TRAINING.md)。另提供 **YOLO26s：COCO 70 轮、4 × 32** 和 **YOLO26s-cls：ImageNet 200 轮、4 × 64** 两套配方。两项均有独立 YAML 和共用模型插件，保留各自官方训练、验证、预测与导出流程；安装和启动见 [YOLO26 使用指南](docs/platform/YOLO26.md)。
 
 ## 厂商扩展
 

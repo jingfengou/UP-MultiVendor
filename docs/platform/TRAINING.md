@@ -4,19 +4,16 @@
 
 **新训练请使用 [统一 UP 训练配方](REFERENCE_RECIPES.md)。** ResNet50、YOLOX、YOLO26 和 DETR 均由原有 `BaseRunner` 执行，训练、验证、图片推理使用通用命令，通过 YAML 选择模型和厂商。
 
-下面保留旧配置与命令，供已有任务恢复和兼容使用。其中 YOLO26 旧入口和 DETR 官方入口使用官方训练循环；不要与新的 `reference_aligned/` 配方混用。
-
-## 旧配置与命令
+各主配方和训练评估入口如下。YOLO26 旧入口和 DETR 官方长程配方仍保留作独立实现/历史任务使用；不要与新的 `reference_aligned/` 插件配方混用。
 
 | 模型 / 配置 | 数据集 | Epochs | 输入 | 卡数 × 每卡训练 batch | 每卡验证 batch |
 |---|---|---:|---|---:|---:|
-| [ResNet50](../../configs/benchmarks/three_vendor/resnet50.yaml) | ImageNet-1K | 100 | 224 | 4 × 256 | 256 |
-| [YOLOX-S](../../configs/benchmarks/three_vendor/yolox_s.yaml) | COCO2017 | 300 | 训练 480–800，验证 640 | 4 × 8 | 8 |
-| [YOLOX-S · Megvii 配方对齐](../../configs/benchmarks/three_vendor/yolox_s_megvii_aligned.yaml) | COCO2017 | 300 | 训练 480–800，验证 640 | 4 × 16 | 16 |
+| [ResNet50 · FAIR 对齐](../../configs/benchmarks/reference_aligned/resnet50_fair_native.yaml) | ImageNet-1K | 90 | 224 | 4 × 64 | 64 |
+| [YOLOX-S · Megvii 配方对齐](../../configs/benchmarks/three_vendor/yolox_s_megvii_aligned.yaml) | COCO2017 | 300 | 训练 448–832，验证 640 | 4 × 16 | 16 |
 | [YOLO11s](../../configs/benchmarks/three_vendor/yolo11s.yaml) | COCO2017 | 600 | 640，验证矩形补边 | 4 × 32 | 64 |
 | [DETR-R50](../../configs/benchmarks/three_vendor/detr_r50_official.yaml) | COCO2017 | 500 | 官方多尺度；验证短边 800、长边不超过 1333 | 4 × 4 | 最终验证 2 |
 
-前三个模型训练使用 AMP FP16，验证使用 FP32，seed 为 131；DDP、普通 BN、无梯度累积。全局 batch 分别是 1024、32、128。DETR 使用官方 FP32、FrozenBN、seed 42，全局 batch 16。配置会检查四卡 world size；运行前须在目标设备上确认显存与配套 SDK。
+各任务的精度、seed、BN 和全局 batch 以其当前 YAML 为准。YOLOX-S 只保留 Megvii 配方对齐版：全局 batch 64，AMP，作者 Focus 通道顺序与无残差 CSP neck。
 
 每家设备按 **ResNet50 → YOLOX-S → YOLO11s → DETR-R50** 顺序运行。
 
@@ -35,13 +32,13 @@ unzip coco2017labels-segments.zip -d /data
 
 | 参数 | ResNet50 | YOLOX-S | YOLO11s |
 |---|---|---|---|
-| 优化器 | SGD，lr 0.4，momentum 0.9 | SGD，全局 batch 32 时 lr 0.005 | SGD，lr 0.01，momentum 0.9 |
+| 优化器 | SGD，lr 0.4，momentum 0.9 | Nesterov SGD，全局 batch 64 时 lr 0.01 | SGD，lr 0.01，momentum 0.9 |
 | Weight decay | 0.0001 | 0.0005 | nominal batch 64，batch 128 时为 0.001 |
 | 学习率 | 30 / 60 / 90 轮降为原来的 0.1 | 5 轮 warmup + 余弦衰减 | 3 轮 warmup + 线性衰减至初始的 0.01 |
-| 训练收尾 | 保留分类增强 | 最后 15 轮关闭强增强并切换原训练阶段 | 最后 10 轮关闭 Mosaic、MixUp、CopyPaste |
+| 训练收尾 | 保留分类增强 | 从第 285 轮起关闭强增强并切换原训练阶段 | 最后 10 轮关闭 Mosaic、MixUp、CopyPaste |
 | EMA | 不启用 | UP EMA | Ultralytics EMA |
 
-完整参数以 YAML 为准。原 YOLOX-S 三厂商配置保留原始 UP 配方；Megvii 对齐任务使用单独配置，使用作者 Focus 通道顺序和无残差 PAFPN CSP 层，并固定全局 BS64、作者 BN（`eps=1e-3`、`momentum=0.03`）、480–800 按 batch 多尺度、每 10 轮验证并在第 285 轮切换 no-aug，EMA BN 不做额外跨卡平均。该配方的 `random_seed: null` 不主动设置全局随机种子，对应 Megvii `Exp.seed=None` 默认值。ResNet50 和 YOLOX 仍使用 UP BaseRunner；YOLO11 的网络、损失、增强和 EMA 使用 `ultralytics==8.3.225`。从零训练时使用公共随机初始化，不加载已训练权重。原生运行不强制确定性，TF32 关闭；厂商计算库开关见 [接入指南](ADDING_VENDOR.md)。
+完整参数以 YAML 为准。YOLOX-S 只维护 Megvii 配方对齐版：作者 Focus 通道顺序、无残差 PAFPN CSP 层、Megvii 仿射与加法 HSV 增强、全局 BS64、作者 BN（`eps=1e-3`、`momentum=0.03`）、448–832 按 batch 多尺度、第 285 轮切换 no-aug，EMA BN 不做额外跨卡平均。`random_seed: null` 对应 Megvii `Exp.seed=None`；训练索引仍由 UP 的 `DistributedSampler` 生成，不保证与 Megvii `InfiniteSampler` 的样本顺序相同。ResNet50 和 YOLOX 仍使用 UP BaseRunner；YOLO11 的网络、损失、增强和 EMA 使用 `ultralytics==8.3.225`。从零训练时使用公共随机初始化，不加载已训练权重。原生运行不强制确定性，TF32 关闭；厂商计算库开关见 [接入指南](ADDING_VENDOR.md)。
 
 ## 初始化与训练
 
@@ -56,7 +53,7 @@ RUN=/data/up-runs/${PLATFORM}/yolo11s
 python -m up train --config $CFG --ng 4 --launch pytorch --opts runtime.platform $PLATFORM saver.pretrain_model /data/up-init/yolo11s-seed131.pth saver.save_dir $RUN/checkpoints saver.results_dir $RUN/results
 ```
 
-ResNet50、YOLOX 替换配置、初始化文件和输出目录。每家先进入对应 Torch 环境，再选择 `runtime.platform`；配置不会自动安装或替换 Torch。
+YOLOX 替换配置和输出目录。ResNet50 使用表中的 FAIR 对齐配方。每家先进入对应 Torch 环境，再选择 `runtime.platform`；配置不会自动安装或替换 Torch。
 
 Megvii 对齐的 YOLOX-S 配置使用当前工作目录下的 `coco/` 数据路径，输出到 `outputs/`。训练时使用按原点变换的 Mosaic 仿射、加法 HSV 和每卡正样本数归一化损失。评估历史权重时，选用该权重归档的网络配置和源码。NVIDIA 环境需先在源码目录运行 `UP_BUILD_PLATFORM=nvidia python setup.py build_ext --inplace`，供 SimOTA 和 NMS 加载原生算子。可在新的 AFS 运行目录执行以下命令。
 

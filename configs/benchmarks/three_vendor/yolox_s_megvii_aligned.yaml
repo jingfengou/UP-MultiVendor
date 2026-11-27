@@ -1,6 +1,6 @@
 # Megvii YOLOX-S recipe with UP BaseRunner and registered UP components.
 # Run from a fresh output directory containing a `coco` symlink.
-num_classes: !include yolox_s.yaml//num_classes
+num_classes: !include ../_components/yolox_s.yaml//num_classes
 runtime:
   platform: nvidia
   runner: {type: base}
@@ -46,11 +46,11 @@ dataset:
             fill_color: 114
             megvii_labels: true
         - &hsv {type: yolox_additive_hsv}
-        - &flip !include yolox_s.yaml//flip
+        - &flip !include ../_components/yolox_s.yaml//flip
         - &train_resize
           type: keep_ar_resize_max
           kwargs: {max_size: 640, padding_type: left_top, padding_val: 114}
-        - &to_tensor !include yolox_s.yaml//to_tensor
+        - &to_tensor !include ../_components/yolox_s.yaml//to_tensor
     batch_sampler:
       type: base
       kwargs:
@@ -92,8 +92,8 @@ trainer:
   test_freq: 10
   save_freq: 5
   only_save_latest: false
-  optimizer: !include yolox_s.yaml//trainer.optimizer
-  lr_scheduler: !include yolox_s.yaml//trainer.lr_scheduler
+  optimizer: !include ../_components/yolox_s.yaml//trainer.optimizer
+  lr_scheduler: !include ../_components/yolox_s.yaml//trainer.lr_scheduler
 
 saver:
   save_dir: outputs/checkpoints
@@ -103,6 +103,7 @@ saver:
 hooks:
 - type: yolox_noaug
   kwargs:
+    # UP uses a zero-based iteration threshold; 16 starts at epoch 285.
     no_aug_epoch: 16
     max_epoch: *max_epoch
     switch_before_data: true
@@ -110,14 +111,14 @@ hooks:
     save_freq: 5
     transformer: [*hsv, *flip, *train_resize, *to_tensor]
 - type: yolox_batch_resize
-  kwargs: {input_size: 640, random_size: [15, 25], interval: 10}
+  kwargs: {input_size: 640, random_size: [14, 26], interval: 10}
 - type: auto_save_best
 - type: auto_save_metric
   kwargs: {metric_json: outputs/results/metrics.json}
 
-ema: !include yolox_s.yaml//ema
-net: !include yolox_s.yaml//net
-export: !include yolox_s.yaml//export
+ema: !include ../_components/yolox_s.yaml//ema
+net: !include ../_components/yolox_s.yaml//net
+export: !include ../_components/yolox_s.yaml//export
 override@:
   trainer.lr_scheduler.warmup_ratio: 0.0
   net.0.kwargs.focus_type: yolox_focus

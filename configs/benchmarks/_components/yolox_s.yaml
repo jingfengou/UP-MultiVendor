@@ -1,0 +1,100 @@
+# Shared UP YOLOX-S model and optimizer components.
+# Included by the single maintained Megvii-aligned benchmark recipe.
+num_classes: 81
+
+flip:
+  type: flip
+  kwargs:
+    flip_p: 0.5
+
+to_tensor:
+  type: custom_to_tensor
+
+trainer:
+  optimizer:
+    register_type: yolov5
+    type: SGD
+    kwargs:
+      lr: 0.00015625
+      momentum: 0.9
+      nesterov: true
+      weight_decay: 0.0005
+  lr_scheduler:
+    lr_register_type: yolox_base
+    warmup_epochs: 5
+    warmup_type: yolox_cos
+    type: YoloXCosineLR
+    kwargs:
+      T_max: 300
+      min_lr_scale: 0.05
+      no_aug_epoch: 15
+
+ema:
+  enable: true
+  ema_type: exp
+  kwargs:
+    decay: 0.9998
+
+net:
+- name: backbone
+  type: yolox_s
+  kwargs:
+    out_layers: [2, 3, 4]
+    out_strides: [8, 16, 32]
+    normalize: {type: solo_bn}
+    act_fn: {type: Silu}
+- name: neck
+  prev: backbone
+  type: YoloxPAFPN
+  kwargs:
+    depth: 0.33
+    out_strides: [8, 16, 32]
+    act_fn: {type: Silu}
+- name: roi_head
+  prev: neck
+  type: YoloXHead
+  kwargs:
+    num_classes: 81
+    width: 0.5
+    num_point: 1
+    act_fn: {type: Silu}
+- name: yolox_post
+  prev: roi_head
+  type: yolox_post
+  kwargs:
+    num_classes: 81
+    cfg:
+      loc_loss:
+        type: iou_loss
+        kwargs:
+          loss_type: square_iou
+          loss_weight: 5.0
+      cls_loss:
+        type: sigmoid_cross_entropy
+      obj_loss:
+        type: sigmoid_cross_entropy
+      anchor_generator:
+        type: fcos
+        kwargs:
+          dense_points: 1
+          center: false
+      roi_supervisor:
+        type: ota
+        kwargs:
+          num_classes: 81
+          matcher:
+            type: ota
+            kwargs:
+              num_classes: 81
+      roi_predictor:
+        type: yolox
+        kwargs:
+          num_classes: 81
+          pre_nms_score_thresh: 0.01
+          nms:
+            type: naive
+            nms_iou_thresh: 0.65
+
+export:
+  input_size: [3, 640, 640]
+  opset: 17
