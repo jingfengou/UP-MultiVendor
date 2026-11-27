@@ -36,11 +36,33 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+          import os
           from up.utils.general.yaml_loader import load_yaml
+          # Syntax-only bindings; this job does not load official models or data.
+          for key in ('YOLO26_DETECT_SOURCE', 'YOLO26_CLASSIFY_SOURCE', 'DETR_SOURCE',
+                      'COCO_ROOT', 'COCO_YOLO_YAML', 'IMAGENET_ROOT', 'OBJECTS365_WEIGHTS',
+                      'UP_IMAGENET_ROOT', 'UP_COCO_ROOT', 'UP_FAIR_OUTPUT_ROOT',
+                      'UP_MEGVII_YOLOX_OUTPUT_ROOT'):
+              os.environ[key] = '/tmp/up-config-check/' + key.lower()
           for path in sorted(Path('configs').rglob('*.yaml')):
               config = load_yaml(str(path))
               assert isinstance(config, dict), path
               print(path)
+          PY
+      - name: Check model plugin registration
+        run: |
+          DEFAULT_TASKS=cls:det python - <<'PY'
+          import torch
+          import up
+          from up.utils.general.registry_factory import (
+              MODULE_ZOO_REGISTRY, DATA_BUILDER_REGISTY, INFERENCER_REGISTRY)
+          from up.utils.model.optimizer_helper import BaseOptimizer
+          from up.tasks.det.plugins.yolo26.utils.optimizer_helper import YOLO26Optimizer
+          for name, plugin in [('official_yolo26', 'yolo26'), ('official_detr', 'detr')]:
+              for registry in (MODULE_ZOO_REGISTRY, DATA_BUILDER_REGISTY, INFERENCER_REGISTRY):
+                  assert registry[name].__module__.startswith('up.tasks.det.plugins.' + plugin + '.')
+          assert YOLO26Optimizer.build_optimizer is BaseOptimizer.build_optimizer
+          assert not torch.cuda.is_initialized()
           PY
       - name: Public wheel build without CUDA
         run: |

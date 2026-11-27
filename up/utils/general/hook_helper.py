@@ -121,6 +121,10 @@ class Hook(object):
         """
         pass
 
+    def before_epoch(self, cur_epoch):
+        """Update model/dataset epoch state before the shared runner fetches data."""
+        pass
+
     def after_epoch(self, cur_epoch):
         """ Make sense after epoch
         Arguments:
@@ -741,6 +745,10 @@ class AutoSaveBest(Hook):
         cur_epoch = self.runner_ref().cur_epoch()
         cur_iter = self.runner_ref().cur_iter
         if env.is_master():
+            runner = self.runner_ref()
+            if getattr(runner, 'execution', None):
+                runner.save(auto_save=prefix, lns=False, metric_val=metric_val)
+                return
             if self.runner_ref().ema is not None:
                 ema = self.runner_ref().ema.state_dict()
             else:

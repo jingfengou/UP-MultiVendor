@@ -90,7 +90,9 @@ class Saver(object):
     def load_checkpoint(ckpt_path, convert=False):
         # 检查点先加载到 CPU 存储，再由模型 .to() 迁移，避免还原时绑定旧厂商设备。
         # assert os.path.exists(ckpt_path), f'No such file: {ckpt_path}'
-        ckpt_dict = PetrelHelper.load(ckpt_path, map_location='cpu')
+        # UP checkpoints contain optimizer/RNG/NumPy state, not only tensor weights.
+        # This restores the pre-2.6 loading behavior; use only trusted checkpoints.
+        ckpt_dict = PetrelHelper.load(ckpt_path, map_location='cpu', weights_only=False)
         return Saver.process_checkpoint(ckpt_dict, convert)
 
     @staticmethod

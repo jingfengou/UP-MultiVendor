@@ -38,6 +38,8 @@ class YoloxNoaug(Hook):
             runner.data_iterators = {}
         logger.info("rebuild dataloader")
         runner.build_dataloaders()
+        if self.switch_before_data:
+            runner.data_loaders['train'].batch_sampler.set_start_iter(cur_iter)
         runner.data_iterators['train'] = iter(runner.data_loaders["train"])
         try:
             if env.world_size > 1:
@@ -51,7 +53,7 @@ class YoloxNoaug(Hook):
         self.flag = True
 
     def before_data(self, cur_iter):
-        if self.switch_before_data:
+        if self.switch_before_data and self.runner_ref().model.training:
             self.switch(cur_iter)
 
     def before_forward(self, cur_iter, input):
