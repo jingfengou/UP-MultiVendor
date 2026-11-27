@@ -18,7 +18,7 @@ cd UP-MultiVendor
 | DETR-R50 | [detr_r50.yaml](configs/benchmarks/reference_aligned/detr_r50.yaml) |
 | YOLO11s | [yolo11s.yaml](configs/benchmarks/three_vendor/yolo11s.yaml) |
 
-以上是各正式 benchmark 任务的唯一完整训练配置。`configs/benchmarks/_components/` 中的 YAML 是被主配方 include 的组件片段，不是独立训练配置。`configs/cls/`、`configs/det/` 下仍保留通用模型和平台 smoke-test 示例；它们不代表当前精度对比配方。尤其是 `configs/det/yolox/yolox_small.yaml` 是通用原版 UP 示例，正式 YOLOX-S 对比应使用表中的 Megvii 对齐配方。
+每项 benchmark 的训练和验证共用表中一份 YAML，不需要另拷配方片段。`configs/cls/`、`configs/det/` 下是通用模型和平台测试示例；例如 `configs/det/yolox/yolox_small.yaml` 使用原版 UP 配方，正式 YOLOX-S 精度对比请用表中的 Megvii 对齐配方。
 
 ## 架构
 

@@ -1,6 +1,6 @@
 # ImageNet / COCO 训练指南
 
-正式对比使用下表中的 benchmark 配方。每个模型任务只维护一份完整可运行配置；`configs/benchmarks/_components/` 是主配置 include 的组件片段，不是独立配方。`configs/cls/`、`configs/det/` 下的通用 YAML 用于模型示例或平台 smoke test，不用于报告 benchmark 结果。
+正式训练和验证使用下表中的同一份任务 YAML。ResNet50 的 FAIR 配方和 YOLOX-S 的 Megvii 对齐配方都在各自主文件中定义网络、数据处理和优化器，不需要配套的 YAML 片段。`configs/cls/`、`configs/det/` 下的通用示例用于平台测试，不用于报告 benchmark 结果。
 
 | 模型 / 任务 | 数据与指标 | 当前配方 | Epoch | 全局 batch（4 卡示例） | 精度 / seed |
 |---|---|---|---:|---:|---|

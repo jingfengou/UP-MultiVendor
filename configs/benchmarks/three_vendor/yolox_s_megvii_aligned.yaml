@@ -1,6 +1,6 @@
 # Megvii YOLOX-S recipe with UP BaseRunner and registered UP components.
 # Run from a fresh output directory containing a `coco` symlink.
-num_classes: !include ../_components/yolox_s.yaml//num_classes
+num_classes: &num_classes 81
 runtime:
   platform: nvidia
   runner: {type: base}
@@ -46,11 +46,11 @@ dataset:
             fill_color: 114
             megvii_labels: true
         - &hsv {type: yolox_additive_hsv}
-        - &flip !include ../_components/yolox_s.yaml//flip
+        - &flip {type: flip, kwargs: {flip_p: 0.5}}
         - &train_resize
           type: keep_ar_resize_max
           kwargs: {max_size: 640, padding_type: left_top, padding_val: 114}
-        - &to_tensor !include ../_components/yolox_s.yaml//to_tensor
+        - &to_tensor {type: custom_to_tensor}
     batch_sampler:
       type: base
       kwargs:
@@ -92,8 +92,24 @@ trainer:
   test_freq: 10
   save_freq: 5
   only_save_latest: false
-  optimizer: !include ../_components/yolox_s.yaml//trainer.optimizer
-  lr_scheduler: !include ../_components/yolox_s.yaml//trainer.lr_scheduler
+  optimizer:
+    register_type: yolov5
+    type: SGD
+    kwargs:
+      lr: 0.00015625
+      momentum: 0.9
+      nesterov: true
+      weight_decay: 0.0005
+  lr_scheduler:
+    lr_register_type: yolox_base
+    warmup_epochs: 5
+    warmup_type: yolox_cos
+    type: YoloXCosineLR
+    kwargs:
+      T_max: *max_epoch
+      min_lr_scale: 0.05
+      no_aug_epoch: 15
+    warmup_ratio: 0.0
 
 saver:
   save_dir: outputs/checkpoints
@@ -116,11 +132,65 @@ hooks:
 - type: auto_save_metric
   kwargs: {metric_json: outputs/results/metrics.json}
 
-ema: !include ../_components/yolox_s.yaml//ema
-net: !include ../_components/yolox_s.yaml//net
-export: !include ../_components/yolox_s.yaml//export
-override@:
-  trainer.lr_scheduler.warmup_ratio: 0.0
-  net.0.kwargs.focus_type: yolox_focus
-  net.1.kwargs.csp_shortcut: false
-  net.3.kwargs.all_reduce_norm: false
+ema:
+  enable: true
+  ema_type: exp
+  kwargs: {decay: 0.9998}
+
+net:
+- name: backbone
+  type: yolox_s
+  kwargs:
+    out_layers: [2, 3, 4]
+    out_strides: [8, 16, 32]
+    normalize: {type: solo_bn}
+    act_fn: {type: Silu}
+    focus_type: yolox_focus
+- name: neck
+  prev: backbone
+  type: YoloxPAFPN
+  kwargs:
+    depth: 0.33
+    out_strides: [8, 16, 32]
+    act_fn: {type: Silu}
+    csp_shortcut: false
+- name: roi_head
+  prev: neck
+  type: YoloXHead
+  kwargs:
+    num_classes: *num_classes
+    width: 0.5
+    num_point: 1
+    act_fn: {type: Silu}
+- name: yolox_post
+  prev: roi_head
+  type: yolox_post
+  kwargs:
+    num_classes: *num_classes
+    cfg:
+      loc_loss:
+        type: iou_loss
+        kwargs: {loss_type: square_iou, loss_weight: 5.0}
+      cls_loss: {type: sigmoid_cross_entropy}
+      obj_loss: {type: sigmoid_cross_entropy}
+      anchor_generator:
+        type: fcos
+        kwargs: {dense_points: 1, center: false}
+      roi_supervisor:
+        type: ota
+        kwargs:
+          num_classes: *num_classes
+          matcher:
+            type: ota
+            kwargs: {num_classes: *num_classes}
+      roi_predictor:
+        type: yolox
+        kwargs:
+          num_classes: *num_classes
+          pre_nms_score_thresh: 0.01
+          nms: {type: naive, nms_iou_thresh: 0.65}
+    all_reduce_norm: false
+
+export:
+  input_size: [3, 640, 640]
+  opset: 17
